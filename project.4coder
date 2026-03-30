@@ -1,0 +1,65 @@
+version(2);
+project_name = "chronicles";
+
+patterns = {
+    "*.c",
+    "*.cpp",
+    "*.ds",
+    "*.h",
+    "*.bat",
+    "*.sh",
+    "*.4coder",
+};
+blacklist_patterns = {
+    ".*",
+};
+
+load_paths = {
+    .win = {
+        { .path = ".", .recursive = true, .relative = true, },
+    },
+    .lin = {
+        { .path = ".", .recursive = true, .relative = true, },
+    },
+};
+
+commands = {
+    .make = {
+        .win = "C:\dev\chronicles\chronicles\code\build-make.bat",
+        .lin = "/home/trist007/dev/chronicles/chronicles/code/run.sh",
+        .out = "*run*",
+        .footer_panel = true,
+        .save_dirty_files = true,
+        .cursor_at_end = false,
+    },
+    .run = {
+        .win = "C:\dev\chronicles\chronicles\code\run.bat",
+        .lin = "/home/trist007/dev/chronicles/chronicles/code/run.sh",
+        .out = "*run*",
+        .footer_panel = true,
+        .save_dirty_files = true,
+        .cursor_at_end = false,
+    },
+    .debug = {
+        .win = "C:\dev\chronicles\chronicles\code\debug.bat",
+        .out = "*debug*",
+        .footer_panel = true,
+        .save_dirty_files = true,
+        .cursor_at_end = false,
+    },
+    .make_clean = {
+        .win = "C:\dev\chronicles\chronicles\code\build-make_clean.bat",
+        .out = "*run*",
+        .footer_panel = true,
+        .save_dirty_files = true,
+        .cursor_at_end = false,
+    },
+};
+
+fkey_command = {
+    .F1 = "make",
+    .F2 = "run",
+    .F3 = "debug",
+    .F5 = "make_clean",
+};
+
