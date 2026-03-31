@@ -1,115 +1,5 @@
 extern const int WINDOW_WIDTH;
 extern const int WINDOW_HEIGHT;
-//extern int *gFrameBuffer;
-//extern float *gZBuffer;
-//extern float gModelX, gModelY, gModelZ;
-
-struct Vec2 { float u, v; };
-struct Vec3 { float x, y, z; };
-struct Vec4 { float x, y, z, w; };
-
-//extern Vec3 *gSkinnedPositions;
-//extern Vec3 *gSkinnedNormals;
-
-
-struct Vertex
-{
-    Vec3 pos;
-    Vec3 normal;
-    Vec2 uv;
-    // skinning
-    int   joints[4];
-    float weights[4];
-};
-
-struct Tri { int v[3]; };
-
-// per joint
-struct Joint
-{
-    float inverseBindMatrix[16];
-    int   parent;  // -1 if root
-    char  name[64];
-    Vec3  defaultTranslation;
-    Vec4  defaultRotation;
-    Vec3  defaultScale;
-};
-
-// animation keyframes
-struct Keyframe
-{
-    float time;
-    Vec4  value;  // vec3 for translation/scale, vec4 for rotation quaternion
-};
-
-struct AnimChannel
-{
-    int       jointIndex;
-    int       type;        // 0=translation, 1=rotation, 2=scale
-    Keyframe *keyframes;
-    int       keyframeCount;
-};
-
-struct Animation
-{
-    char        name[64];
-    AnimChannel *channels;
-    int          channelCount;
-    float        duration;
-};
-
-struct Primitive
-{
-    int vertOffset;
-    int triOffset;
-    int triCount;
-    unsigned int color;  // ARGB from material
-};
-
-// mesh
-struct Mesh
-{
-    Vertex    *verts;
-    int        vertCount;
-    Tri       *tris;
-    int        triCount;
-    Primitive  primitives[16];
-    int        primitiveCount;
-};
-
-// skeleton
-struct Skeleton
-{
-    Joint *joints;
-    int    jointCount;
-};
-
-// full model
-struct Model
-{
-    Mesh      mesh;
-    Skeleton  skeleton;
-    Animation *animations;
-    int        animCount;
-};
-
-Model gModel;
-
-struct Transform
-{
-    Vec3 translation;
-    Vec4 rotation;    // quaternion xyzw
-    Vec3 scale;
-};
-
-struct Pose
-{
-    Transform *joints;    // local space transforms
-    float     *matrices;  // final skinning matrices, jointCount * 16 floats
-    int        jointCount;
-};
-
-Pose gPose;
 
 void pose_init(Pose *pose, Skeleton *skel)
 {
@@ -126,6 +16,7 @@ void pose_init(Pose *pose, Skeleton *skel)
         pose->joints[i].scale       = skel->joints[i].defaultScale;
     }
 }
+
 
 inline float min(float a, float b)
 {
@@ -413,15 +304,15 @@ int path_to_type(cgltf_animation_path_type path)
     }
 }
 
-void extract_animations(cgltf_data *data, Model *model)
+void extract_animations(cgltf_data *data, Model *m)
 {
-    model->animCount  = (int)data->animations_count;
-    model->animations = (Animation*)malloc(model->animCount * sizeof(Animation));
+    m->animCount  = (int)data->animations_count;
+    m->animations = (Animation*)malloc(m->animCount * sizeof(Animation));
     
-    for(int a = 0; a < model->animCount; a++)
+    for(int a = 0; a < m->animCount; a++)
     {
         cgltf_animation *src  = &data->animations[a];
-        Animation       *anim = &model->animations[a];
+        Animation       *anim = &m->animations[a];
         
         strncpy(anim->name, src->name ? src->name : "unnamed", 63);
         anim->channelCount = (int)src->channels_count;
@@ -454,7 +345,7 @@ void extract_animations(cgltf_data *data, Model *model)
     }
 }
 
-bool load_model(const char *path)
+bool load_model(Model *m, const char *path)
 {
     cgltf_options options = {};
     cgltf_data   *data    = NULL;
@@ -471,9 +362,9 @@ bool load_model(const char *path)
         return false;
     }
     
-    extract_mesh(data, &gModel.mesh);
-    extract_skeleton(data, &gModel.skeleton);
-    extract_animations(data, &gModel);
+    extract_mesh(data, &m->mesh);
+    extract_skeleton(data, &m->skeleton);
+    extract_animations(data, m);
     
     SDL_Log("mesh count: %d", (int)data->meshes_count);
     for(int i = 0; i < (int)data->meshes_count; i++)
