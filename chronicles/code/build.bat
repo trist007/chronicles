@@ -10,7 +10,7 @@ set SDLIMAGE_Include=/I"..\chronicles\external\SDL3_image-3.4.0\include"
 
 set CommonCompilerFlags=-MT -nologo -fp:fast -Gm- -GR- -EHa- -Od -Oi -WX -W4 -wd4201 -wd4100 -wd4189 -wd4244 -wd4996 -wd4456 -FC -Z7 %SDL_Include% %SDLIMAGE_Include%
 
-set CommonLinkerFlags=-incremental:no -opt:ref /DEBUG /PDB:main.pdb %SDL_LIB% %SDLIMAGE_LIB% user32.lib gdi32.lib winmm.lib shell32.lib kernel32.lib msvcrt.lib /NODEFAULTLIB:LIBCMT /NODEFAULTLIB:MSVCRTD /SUBSYSTEM:WINDOWS
+set CommonLinkerFlags=-incremental:no -opt:ref /DEBUG /PDB:main.pdb %SDL_LIB% %SDLIMAGE_LIB% user32.lib gdi32.lib winmm.lib shell32.lib kernel32.lib /SUBSYSTEM:WINDOWS
 
 REM echo Updating etags
 REM echo,

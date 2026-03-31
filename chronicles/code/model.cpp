@@ -1,15 +1,15 @@
 extern const int WINDOW_WIDTH;
 extern const int WINDOW_HEIGHT;
-extern int *gFrameBuffer;
-extern float *gZBuffer;
-extern float gModelX, gModelY, gModelZ;
+//extern int *gFrameBuffer;
+//extern float *gZBuffer;
+//extern float gModelX, gModelY, gModelZ;
 
 struct Vec2 { float u, v; };
 struct Vec3 { float x, y, z; };
 struct Vec4 { float x, y, z, w; };
 
-extern Vec3 *gSkinnedPositions;
-extern Vec3 *gSkinnedNormals;
+//extern Vec3 *gSkinnedPositions;
+//extern Vec3 *gSkinnedNormals;
 
 
 struct Vertex
@@ -561,81 +561,32 @@ void eval_pose(Pose *pose, Skeleton *skel)
     }
 }
 
-void skin_mesh(Mesh *mesh, Pose *pose)
+void mat4_perspective(float *m, float fov, float aspect, float znear, float zfar)
 {
-    if(!pose->matrices)
-    {
-        SDL_Log("pose->matrices is null");
-        return;
-    }
-    
-    for(int i = 0; i < mesh->vertCount; i++)
-    {
-        Vertex *v   = &mesh->verts[i];
-        Vec3    pos = {0,0,0};
-        Vec3    nor = {0,0,0};
-        
-        for(int j = 0; j < 4; j++)
-        {
-            float w = v->weights[j];
-            if(w == 0.0f) continue;
-            
-            float *m = &pose->matrices[v->joints[j] * 16];
-            Vec3 p, n;
-            mat4_mul_vec3(m, v->pos,    &p);
-            mat4_mul_vec3(m, v->normal, &n);  // note: normals need inverse transpose for correctness but this is fine for uniform scale
-            pos.x += p.x*w; pos.y += p.y*w; pos.z += p.z*w;
-            nor.x += n.x*w; nor.y += n.y*w; nor.z += n.z*w;
-        }
-        
-        gSkinnedPositions[i] = pos;
-        gSkinnedNormals[i]   = nor;
-    }
+    float f = 1.0f / tanf(fov * 0.5f);
+    memset(m, 0, 64);
+    m[0]  = f / aspect;
+    m[5]  = f;
+    m[10] = (zfar + znear) / (znear - zfar);
+    m[11] = -1.0f;
+    m[14] = (2.0f * zfar * znear) / (znear - zfar);
 }
 
-Vec3 project(Vec3 v, float rotY)
+void mat4_translation(float *m, float x, float y, float z)
 {
-    float cosR = cosf(rotY), sinR = sinf(rotY);
-    float rx = v.x * cosR - v.z * sinR;
-    float rz = v.x * sinR + v.z * cosR;
-    //v.x = rx;
-    //v.z = rz;
-    //v.z += 5.0f;
-    v.x = rx + gModelX;
-    v.z = rz + gModelZ;
-    v.y = -v.y + gModelY;
-    float px = (v.x / v.z) * (WINDOW_HEIGHT / 2) + WINDOW_WIDTH  / 2;
-    float py = (v.y / v.z) * (WINDOW_HEIGHT / 2) + WINDOW_HEIGHT / 2;
-    return {px, py, v.z};
+    mat4_identity(m);
+    m[12] = x;
+    m[13] = y;
+    m[14] = z;
 }
 
-void draw_tri(Vec3 a, Vec3 b, Vec3 c, unsigned int color)
+void mat4_rotation_y(float *m, float angle)
 {
-    int minx = max(0,              (int)min3(a.x, b.x, c.x));
-    int maxx = min(WINDOW_WIDTH-1, (int)max3(a.x, b.x, c.x));
-    int miny = max(0,              (int)min3(a.y, b.y, c.y));
-    int maxy = min(WINDOW_HEIGHT-1,(int)max3(a.y, b.y, c.y));
-    
-    for(int y = miny; y <= maxy; y++)
-    {
-        for(int x = minx; x <= maxx; x++)
-        {
-            float w0 = ((b.x-a.x)*(y-a.y) - (b.y-a.y)*(x-a.x));
-            float w1 = ((c.x-b.x)*(y-b.y) - (c.y-b.y)*(x-b.x));
-            float w2 = ((a.x-c.x)*(y-c.y) - (a.y-c.y)*(x-c.x));
-            if(w0 >= 0 && w1 >= 0 && w2 >= 0)
-            {
-                float area = w0+w1+w2;
-                float z = (w0*a.z + w1*b.z + w2*c.z) / area;
-                int idx = y*WINDOW_WIDTH + x;
-                if(z < gZBuffer[idx])
-                {
-                    gZBuffer[idx] = z;
-                    gFrameBuffer[idx] = color | 0xff000000;
-                }
-            }
-        }
-    }
+    mat4_identity(m);
+    m[0]  =  cosf(angle);
+    m[2]  =  sinf(angle);
+    m[8]  = -sinf(angle);
+    m[10] =  cosf(angle);
 }
 
 void
