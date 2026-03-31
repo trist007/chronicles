@@ -8,15 +8,45 @@
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
 
+struct Arena
+{
+    uint8_t  *base;
+    size_t   size;
+    size_t   offset;
+};
+
+// Globals
+SDL_Window                      *gSDLWindow;
+SDL_GPUDevice                   *gGPUDevice;
+SDL_GPUTexture                  *gDepthTexture;
+SDL_GPUGraphicsPipeline         *gPipeline;
+Arena                           gArena;
+
+static int                      gDone;
+
+const int gWINDOW_WIDTH  = 1920 / 2;
+const int gWINDOW_HEIGHT = 1080 / 2;
+
+void
+arenaInit(Arena *a, void *buf, size_t size)
+{
+    a->base   = (uint8_t *)buf;
+    a->size   = size;
+    a->offset = 0;
+}
+
+void *
+arenaAlloc(Arena *a, size_t s)
+{
+    if(a->offset + s > a->size)
+        return NULL;
+    void *ptr = a->base + a->offset;
+    a->offset += s;
+    
+    return ptr;
+}
+
 #include "graphics.cpp"
-
-SDL_Window*          gSDLWindow;
-static int           gDone;
-
-const int WINDOW_WIDTH  = 1920 / 2;
-const int WINDOW_HEIGHT = 1080 / 2;
-
-
 
 bool
 update(Player *p)
@@ -50,7 +80,7 @@ update(Player *p)
 }
 
 void
-loop(Renderer *r, Background *b, Model *m, Player *p, SDL_Window *w)
+loop(Background *b, Model *m, Player *p, SDL_Window *w)
 {
     if (!update(p))
     {
@@ -58,7 +88,7 @@ loop(Renderer *r, Background *b, Model *m, Player *p, SDL_Window *w)
     }
     else
     {
-        Render(r, b, m, p, w);
+        Render(b, m, p, w);
     }
 }
 
@@ -70,23 +100,28 @@ main(int argc, char** argv)
         return -1;
     }
     
-    gSDLWindow = SDL_CreateWindow("SDL3 window", WINDOW_WIDTH, WINDOW_HEIGHT, 0);
+    gSDLWindow = SDL_CreateWindow("SDL3 window", gWINDOW_WIDTH, gWINDOW_HEIGHT, 0);
     
-    Renderer r = {};
-    RendererInit(&r, gSDLWindow);
+    // 16MB will need static for BSS as stack limit is 1MB
+    static uint8_t perm[16 * 1024 * 1024];
+    
+    gArena = {};
+    arenaInit(&gArena, perm, sizeof(perm));
+    
+    RendererInit();
     Background b = {};
-    LoadBackground(&r, &b, gSDLWindow);
+    LoadBackground(&b);
     Model m = {};
-    LoadModel(&r, &m, gSDLWindow);
+    LoadModel(&m);
     Player p = {};
     
     gDone = 0;
     while (!gDone)
     {
-        loop(&r, &b, &m, &p, gSDLWindow);
+        loop(&b, &m, &p, gSDLWindow);
         
     }
-    RendererDestroy(&r, &b, &m);
+    RendererDestroy(&b, &m);
     
     SDL_DestroyWindow(gSDLWindow);
     SDL_Quit();

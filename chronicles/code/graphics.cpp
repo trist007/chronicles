@@ -1,5 +1,13 @@
-extern const int WINDOW_WIDTH;
-extern const int WINDOW_HEIGHT;
+extern const int gWINDOW_WIDTH;
+extern const int gWINDOW_HEIGHT;
+
+extern SDL_Window                       *gSDLWindow;
+extern SDL_GPUDevice                    *gGPUDevice;
+extern SDL_GPUTexture                   *gDepthTexture;
+extern SDL_GPUGraphicsPipeline          *gPipeline;
+extern Arena                            gArena;
+
+void *arenaAlloc(Arena *, size_t s);
 
 struct Vec2 { float u, v; };
 struct Vec3 { float x, y, z; };
@@ -89,13 +97,6 @@ struct Pose
     Transform *joints;    // local space transforms
     float     *matrices;  // final skinning matrices, jointCount * 16 floats
     int        jointCount;
-};
-
-struct Renderer
-{
-    SDL_GPUDevice             *gpuDevice;
-    SDL_GPUTexture            *depthTexture;
-    SDL_GPUGraphicsPipeline   *pipeline;
 };
 
 struct Background
@@ -258,7 +259,7 @@ void extract_skeleton(cgltf_data *data, Skeleton *skel)
     cgltf_skin *skin = &data->skins[0];
     
     skel->jointCount = (int)skin->joints_count;
-    skel->joints = (Joint*)malloc(skel->jointCount * sizeof(Joint));
+    skel->joints = (Joint*)arenaAlloc(&gArena, (skel->jointCount * sizeof(Joint)));
     
     for(int i = 0; i < skel->jointCount; i++)
     {
@@ -322,7 +323,7 @@ int path_to_type(cgltf_animation_path_type path)
 void extract_animations(cgltf_data *data, Model *m)
 {
     m->animCount  = (int)data->animations_count;
-    m->animations = (Animation*)malloc(m->animCount * sizeof(Animation));
+    m->animations = (Animation*)arenaAlloc(&gArena, (m->animCount * sizeof(Animation)));
     
     for(int a = 0; a < m->animCount; a++)
     {
@@ -331,7 +332,7 @@ void extract_animations(cgltf_data *data, Model *m)
         
         strncpy(anim->name, src->name ? src->name : "unnamed", 63);
         anim->channelCount = (int)src->channels_count;
-        anim->channels     = (AnimChannel*)malloc(anim->channelCount * sizeof(AnimChannel));
+        anim->channels     = (AnimChannel*)arenaAlloc(&gArena, (anim->channelCount * sizeof(AnimChannel)));
         anim->duration     = 0.0f;
         
         for(int c = 0; c < anim->channelCount; c++)
@@ -345,7 +346,7 @@ void extract_animations(cgltf_data *data, Model *m)
             
             int count        = (int)samp->input->count;
             ch->keyframeCount = count;
-            ch->keyframes    = (Keyframe*)malloc(count * sizeof(Keyframe));
+            ch->keyframes    = (Keyframe*)arenaAlloc(&gArena, (count * sizeof(Keyframe)));
             
             for(int k = 0; k < count; k++)
             {
@@ -374,8 +375,8 @@ void extract_mesh(cgltf_data *data, Mesh *mesh)
     
     mesh->vertCount = totalVerts;
     mesh->triCount  = totalTris;
-    mesh->verts = (Vertex*)malloc(totalVerts * sizeof(Vertex));
-    mesh->tris  = (Tri*)malloc(totalTris * sizeof(Tri));
+    mesh->verts = (Vertex*)arenaAlloc(&gArena, (totalVerts * sizeof(Vertex)));
+    mesh->tris  = (Tri*)arenaAlloc(&gArena, (totalTris * sizeof(Tri)));
     memset(mesh->verts, 0, totalVerts * sizeof(Vertex));
     
     int vertOffset = 0;
@@ -537,7 +538,7 @@ void sample_animation(Animation *anim, float time, Pose *pose)
 void eval_pose(Pose *pose, Skeleton *skel)
 {
     // world space matrices per joint, temp buffer
-    float *worldMats = (float*)alloca(skel->jointCount * 64);
+    float *worldMats = (float*)arenaAlloc(&gArena, (skel->jointCount * 64));
     
     for(int i = 0; i < skel->jointCount; i++)
     {
@@ -612,25 +613,25 @@ debug_model_bounds(Mesh *mesh)
 }
 
 int
-RendererInit(Renderer *r, SDL_Window *window)
+RendererInit()
 {
     // Create GPUDevice for hardware acceleration
-    r->gpuDevice = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_MSL,
-                                       true, NULL);
-    if(!r->gpuDevice)
+    gGPUDevice = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_MSL,
+                                     true, NULL);
+    if(!gGPUDevice)
     {
         SDL_Log("GPU device is NULL: %s\n", SDL_GetError());
         return(-1);
     }
-    SDL_Log("GPU device ok: %p\n", (void*)r->gpuDevice);
+    SDL_Log("GPU device ok: %p\n", (void*)gGPUDevice);
     
-    SDL_ClaimWindowForGPUDevice(r->gpuDevice, window);
+    SDL_ClaimWindowForGPUDevice(gGPUDevice, gSDLWindow);
     
     return(0);
 }
 
 void
-LoadBackground(Renderer *r, Background *b, SDL_Window *w)
+LoadBackground(Background *b)
 {
     const char *basePath = SDL_GetBasePath();
     SDL_Log("cwd: %s", basePath);
@@ -656,21 +657,21 @@ LoadBackground(Renderer *r, Background *b, SDL_Window *w)
     bgTexInfo.num_levels               = 1;
     
     
-    b->backgroundTexture               = SDL_CreateGPUTexture(r->gpuDevice, &bgTexInfo);
+    b->backgroundTexture               = SDL_CreateGPUTexture(gGPUDevice, &bgTexInfo);
     
     // upload via transfer buffer
     Uint32 bgSize                            = bgRGBA->w * bgRGBA->h * 4;
     SDL_GPUTransferBufferCreateInfo bgTbInfo = {};
     bgTbInfo.usage                           = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
     bgTbInfo.size                            = bgSize;
-    SDL_GPUTransferBuffer *bgTb              = SDL_CreateGPUTransferBuffer(r->gpuDevice, &bgTbInfo);
+    SDL_GPUTransferBuffer *bgTb              = SDL_CreateGPUTransferBuffer(gGPUDevice, &bgTbInfo);
     
     
-    void *bgPtr                              = SDL_MapGPUTransferBuffer(r->gpuDevice, bgTb, false);
+    void *bgPtr                              = SDL_MapGPUTransferBuffer(gGPUDevice, bgTb, false);
     memcpy(bgPtr, bgRGBA->pixels, bgSize);
-    SDL_UnmapGPUTransferBuffer(r->gpuDevice, bgTb);
+    SDL_UnmapGPUTransferBuffer(gGPUDevice, bgTb);
     
-    SDL_GPUCommandBuffer *bgCmd              = SDL_AcquireGPUCommandBuffer(r->gpuDevice);
+    SDL_GPUCommandBuffer *bgCmd              = SDL_AcquireGPUCommandBuffer(gGPUDevice);
     SDL_GPUCopyPass *bgCp                    = SDL_BeginGPUCopyPass(bgCmd);
     
     SDL_GPUTextureTransferInfo bgSrc         = {};
@@ -686,7 +687,7 @@ LoadBackground(Renderer *r, Background *b, SDL_Window *w)
     SDL_UploadToGPUTexture(bgCp, &bgSrc, &bgDst, false);
     SDL_EndGPUCopyPass(bgCp);
     SDL_SubmitGPUCommandBuffer(bgCmd);
-    SDL_ReleaseGPUTransferBuffer(r->gpuDevice, bgTb);
+    SDL_ReleaseGPUTransferBuffer(gGPUDevice, bgTb);
     SDL_DestroySurface(bgRGBA);
     
     // Create sampler
@@ -695,7 +696,7 @@ LoadBackground(Renderer *r, Background *b, SDL_Window *w)
     samplerInfo.mag_filter                           = SDL_GPU_FILTER_LINEAR;
     samplerInfo.address_mode_u                       = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
     samplerInfo.address_mode_v                       = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
-    b->backgroundSampler                             = SDL_CreateGPUSampler(r->gpuDevice, &samplerInfo);
+    b->backgroundSampler                             = SDL_CreateGPUSampler(gGPUDevice, &samplerInfo);
     
     // Load background shader bytecode
     size_t bgvertSize, bgfragSize;
@@ -711,7 +712,7 @@ LoadBackground(Renderer *r, Background *b, SDL_Window *w)
     bgvertInfo.format                                = SDL_GPU_SHADERFORMAT_DXIL;
     bgvertInfo.stage                                 = SDL_GPU_SHADERSTAGE_VERTEX;
     bgvertInfo.num_uniform_buffers                   = 0;
-    SDL_GPUShader *bgvertShader                      = SDL_CreateGPUShader(r->gpuDevice, &bgvertInfo);
+    SDL_GPUShader *bgvertShader                      = SDL_CreateGPUShader(gGPUDevice, &bgvertInfo);
     //SDL_Log("bgvertShader: %p error: %s", (void*)bgvertShader, SDL_GetError());
     
     
@@ -728,7 +729,7 @@ LoadBackground(Renderer *r, Background *b, SDL_Window *w)
     bgfragInfo.num_storage_buffers                   = 0;
     bgfragInfo.num_uniform_buffers                   = 0;
     
-    SDL_GPUShader *bgfragShader                      = SDL_CreateGPUShader(r->gpuDevice, &bgfragInfo);
+    SDL_GPUShader *bgfragShader                      = SDL_CreateGPUShader(gGPUDevice, &bgfragInfo);
     //SDL_Log("bgfragShader: %p error: %s", (void*)bgfragShader, SDL_GetError());
     
     //SDL_Log("GPU driver: %s", SDL_GetGPUDeviceDriver(gpuDevice));
@@ -742,11 +743,11 @@ LoadBackground(Renderer *r, Background *b, SDL_Window *w)
     // no depth stencil state - background doesn't need depth
     
     SDL_GPUColorTargetDescription bgColorDesc        = {};
-    bgColorDesc.format                               = SDL_GetGPUSwapchainTextureFormat(r->gpuDevice, w);
+    bgColorDesc.format                               = SDL_GetGPUSwapchainTextureFormat(gGPUDevice, gSDLWindow);
     bgPipeInfo.target_info.color_target_descriptions = &bgColorDesc;
     bgPipeInfo.target_info.num_color_targets         = 1;
     
-    b->backgroundPipeline = SDL_CreateGPUGraphicsPipeline(r->gpuDevice, &bgPipeInfo);
+    b->backgroundPipeline = SDL_CreateGPUGraphicsPipeline(gGPUDevice, &bgPipeInfo);
     SDL_Log("bgPipeline: %p", (void*)b->backgroundPipeline);
     if(!b->backgroundPipeline)
     {
@@ -754,8 +755,8 @@ LoadBackground(Renderer *r, Background *b, SDL_Window *w)
     }
     
     // can release shaders after pipeline is created
-    SDL_ReleaseGPUShader(r->gpuDevice, bgvertShader);
-    SDL_ReleaseGPUShader(r->gpuDevice, bgfragShader);
+    SDL_ReleaseGPUShader(gGPUDevice, bgvertShader);
+    SDL_ReleaseGPUShader(gGPUDevice, bgfragShader);
     
     SDL_free(bgvertCode);
     SDL_free(bgfragCode);
@@ -764,12 +765,12 @@ LoadBackground(Renderer *r, Background *b, SDL_Window *w)
 void pose_alloc(Pose *pose, Skeleton *skel)
 {
     pose->jointCount = skel->jointCount;
-    pose->joints     = (Transform*)malloc(pose->jointCount * sizeof(Transform));
-    pose->matrices   = (float*)malloc(pose->jointCount * 16 * sizeof(float));
+    pose->joints     = (Transform*)arenaAlloc(&gArena, (pose->jointCount * sizeof(Transform)));
+    pose->matrices   = (float*)arenaAlloc(&gArena, (pose->jointCount * 16 * sizeof(float)));
 }
 
 void
-LoadModel(Renderer *r, Model *m, SDL_Window *window)
+LoadModel(Model *m)
 {
     load_model(m, "../chronicles/data/models/arwin8.glb");
     pose_alloc(&m->pose, &m->skeleton);
@@ -782,27 +783,27 @@ LoadModel(Renderer *r, Model *m, SDL_Window *window)
     SDL_GPUBufferCreateInfo vbInfo         = {};
     vbInfo.usage                           = SDL_GPU_BUFFERUSAGE_VERTEX;
     vbInfo.size                            = m->mesh.vertCount * sizeof(Vertex);
-    m->vertexBuffer                        = SDL_CreateGPUBuffer(r->gpuDevice, &vbInfo);
+    m->vertexBuffer                        = SDL_CreateGPUBuffer(gGPUDevice, &vbInfo);
     
     // index buffer
     SDL_GPUBufferCreateInfo ibInfo         = {};
     ibInfo.usage                           = SDL_GPU_BUFFERUSAGE_INDEX;
     ibInfo.size                            = m->mesh.triCount * 3 * sizeof(int);
-    m->indexBuffer                         = SDL_CreateGPUBuffer(r->gpuDevice, &ibInfo);
+    m->indexBuffer                         = SDL_CreateGPUBuffer(gGPUDevice, &ibInfo);
     
     // Upload transfer buffer
     SDL_GPUTransferBufferCreateInfo tbInfo = {};
     tbInfo.usage                           = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
     tbInfo.size                            = vbInfo.size + ibInfo.size;
-    SDL_GPUTransferBuffer *tb              = SDL_CreateGPUTransferBuffer(r->gpuDevice, &tbInfo);
+    SDL_GPUTransferBuffer *tb              = SDL_CreateGPUTransferBuffer(gGPUDevice, &tbInfo);
     
-    void *ptr = SDL_MapGPUTransferBuffer(r->gpuDevice, tb, false);
+    void *ptr = SDL_MapGPUTransferBuffer(gGPUDevice, tb, false);
     memcpy(ptr, m->mesh.verts, vbInfo.size);
     memcpy((char*)ptr + vbInfo.size, m->mesh.tris, ibInfo.size);
-    SDL_UnmapGPUTransferBuffer(r->gpuDevice, tb);
+    SDL_UnmapGPUTransferBuffer(gGPUDevice, tb);
     
     // Record the upload into a command buffer
-    SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(r->gpuDevice);
+    SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(gGPUDevice);
     SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cmd);
     SDL_GPUTransferBufferLocation src = { tb, 0 };
     SDL_GPUBufferRegion dst = { m->vertexBuffer, 0, vbInfo.size };
@@ -815,7 +816,7 @@ LoadModel(Renderer *r, Model *m, SDL_Window *window)
     // repeat for index buffer at offset vbInfo.size
     SDL_EndGPUCopyPass(cp);
     SDL_SubmitGPUCommandBuffer(cmd);
-    SDL_ReleaseGPUTransferBuffer(r->gpuDevice, tb);
+    SDL_ReleaseGPUTransferBuffer(gGPUDevice, tb);
     
     // Load shader bytecode
     size_t vertSize, fragSize;
@@ -829,7 +830,7 @@ LoadModel(Renderer *r, Model *m, SDL_Window *window)
     vertInfo.format                  = SDL_GPU_SHADERFORMAT_DXIL;
     vertInfo.stage                   = SDL_GPU_SHADERSTAGE_VERTEX;
     vertInfo.num_uniform_buffers     = 1;
-    SDL_GPUShader *vertShader        = SDL_CreateGPUShader(r->gpuDevice, &vertInfo);
+    SDL_GPUShader *vertShader        = SDL_CreateGPUShader(gGPUDevice, &vertInfo);
     
     
     SDL_GPUShaderCreateInfo fragInfo = {};
@@ -839,7 +840,7 @@ LoadModel(Renderer *r, Model *m, SDL_Window *window)
     fragInfo.format                  = SDL_GPU_SHADERFORMAT_DXIL;
     fragInfo.stage                   = SDL_GPU_SHADERSTAGE_FRAGMENT;
     fragInfo.num_uniform_buffers     = 1;
-    SDL_GPUShader *fragShader        = SDL_CreateGPUShader(r->gpuDevice, &fragInfo);
+    SDL_GPUShader *fragShader        = SDL_CreateGPUShader(gGPUDevice, &fragInfo);
     
     // Describe Vertex layout
     SDL_GPUVertexBufferDescription vbDesc = { 0, sizeof(Vertex), SDL_GPU_VERTEXINPUTRATE_VERTEX, 0 };
@@ -864,7 +865,7 @@ LoadModel(Renderer *r, Model *m, SDL_Window *window)
     pipeInfo.depth_stencil_state.compare_op                = SDL_GPU_COMPAREOP_LESS;
     
     SDL_GPUColorTargetDescription colorDesc                = {};
-    colorDesc.format                                       = SDL_GetGPUSwapchainTextureFormat(r->gpuDevice, window);
+    colorDesc.format                                       = SDL_GetGPUSwapchainTextureFormat(gGPUDevice, gSDLWindow);
     pipeInfo.target_info.color_target_descriptions         = &colorDesc;
     pipeInfo.target_info.num_color_targets                 = 1;
     pipeInfo.target_info.depth_stencil_format              = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
@@ -874,37 +875,37 @@ LoadModel(Renderer *r, Model *m, SDL_Window *window)
     depthInfo.type                                         = SDL_GPU_TEXTURETYPE_2D;
     depthInfo.format                                       = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
     depthInfo.usage                                        = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
-    depthInfo.width                                        = WINDOW_WIDTH;
-    depthInfo.height                                       = WINDOW_HEIGHT;
+    depthInfo.width                                        = gWINDOW_WIDTH;
+    depthInfo.height                                       = gWINDOW_HEIGHT;
     depthInfo.layer_count_or_depth                         = 1;
     depthInfo.num_levels                                   = 1;
-    m->depthTexture                                        = SDL_CreateGPUTexture(r->gpuDevice, &depthInfo);
+    m->depthTexture                                        = SDL_CreateGPUTexture(gGPUDevice, &depthInfo);
     
-    m->pipeline = SDL_CreateGPUGraphicsPipeline(r->gpuDevice, &pipeInfo);
+    m->pipeline = SDL_CreateGPUGraphicsPipeline(gGPUDevice, &pipeInfo);
     
     // can release shaders after pipeline is created
-    SDL_ReleaseGPUShader(r->gpuDevice, vertShader);
-    SDL_ReleaseGPUShader(r->gpuDevice, fragShader);
+    SDL_ReleaseGPUShader(gGPUDevice, vertShader);
+    SDL_ReleaseGPUShader(gGPUDevice, fragShader);
     
     SDL_free(vertCode);
     SDL_free(fragCode);
 }
 
 void
-RendererDestroy(Renderer *r, Background *b, Model *m)
+RendererDestroy(Background *b, Model *m)
 {
-    SDL_ReleaseGPUBuffer(r->gpuDevice, m->vertexBuffer);
-    SDL_ReleaseGPUBuffer(r->gpuDevice, m->indexBuffer);
-    SDL_ReleaseGPUTexture(r->gpuDevice, m->depthTexture);
-    SDL_ReleaseGPUTexture(r->gpuDevice, b->backgroundTexture);
-    SDL_ReleaseGPUSampler(r->gpuDevice, b->backgroundSampler);
-    SDL_ReleaseGPUGraphicsPipeline(r->gpuDevice, b->backgroundPipeline);
-    SDL_ReleaseGPUGraphicsPipeline(r->gpuDevice, m->pipeline);
-    SDL_DestroyGPUDevice(r->gpuDevice);
+    SDL_ReleaseGPUBuffer(gGPUDevice, m->vertexBuffer);
+    SDL_ReleaseGPUBuffer(gGPUDevice, m->indexBuffer);
+    SDL_ReleaseGPUTexture(gGPUDevice, m->depthTexture);
+    SDL_ReleaseGPUTexture(gGPUDevice, b->backgroundTexture);
+    SDL_ReleaseGPUSampler(gGPUDevice, b->backgroundSampler);
+    SDL_ReleaseGPUGraphicsPipeline(gGPUDevice, b->backgroundPipeline);
+    SDL_ReleaseGPUGraphicsPipeline(gGPUDevice, m->pipeline);
+    SDL_DestroyGPUDevice(gGPUDevice);
 }
 
 void
-RenderBackground(Renderer *r, Background *b, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain)
+RenderBackground(Background *b, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain)
 {
     SDL_GPUColorTargetInfo bgColor = {};
     bgColor.texture     = swapchain;
@@ -921,21 +922,23 @@ RenderBackground(Renderer *r, Background *b, SDL_GPUCommandBuffer *cmd, SDL_GPUT
 }
 
 void
-RenderModel(Renderer *r, Model *m, Player *p, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain)
+RenderModel(Model *m, Player *p, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain)
 {
+    SDL_Log("Inside RenderModel");
     SDL_GPUColorTargetInfo modelColor = {};
     modelColor.texture  = swapchain;
     modelColor.load_op  = SDL_GPU_LOADOP_LOAD;  // keep background
     modelColor.store_op = SDL_GPU_STOREOP_STORE;
     
     SDL_GPUDepthStencilTargetInfo depth = {};
-    depth.texture      = r->depthTexture;
+    depth.texture      = m->depthTexture;
     depth.load_op      = SDL_GPU_LOADOP_CLEAR;
     depth.clear_depth  = 1.0f;
     depth.store_op     = SDL_GPU_STOREOP_DONT_CARE;
     
     SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(cmd, &modelColor, 1, &depth);
     SDL_BindGPUGraphicsPipeline(pass, m->pipeline);
+    SDL_Log("begin gpurenderpass");
     
     SDL_GPUBufferBinding vb = { m->vertexBuffer, 0 };
     SDL_BindGPUVertexBuffers(pass, 0, &vb, 1);
@@ -944,7 +947,7 @@ RenderModel(Renderer *r, Model *m, Player *p, SDL_GPUCommandBuffer *cmd, SDL_GPU
     
     // build MVP
     float proj[16], view[16], model[16], vp[16], mvp[16];
-    mat4_perspective(proj, 1.0f, (float)WINDOW_WIDTH / WINDOW_HEIGHT, 0.1f, 100.0f);
+    mat4_perspective(proj, 1.0f, (float)gWINDOW_WIDTH / gWINDOW_HEIGHT, 0.1f, 100.0f);
     mat4_translation(view, -p->ModelX, -p->ModelY, -p->ModelZ);
     mat4_rotation_y(model, p->ModelRotY);
     mat4_mul(vp, proj, view);
@@ -974,8 +977,8 @@ RenderModel(Renderer *r, Model *m, Player *p, SDL_GPUCommandBuffer *cmd, SDL_GPU
 void pose_init(Pose *pose, Skeleton *skel)
 {
     pose->jointCount = skel->jointCount;
-    pose->joints     = (Transform*)malloc(pose->jointCount * sizeof(Transform));
-    pose->matrices   = (float*)malloc(pose->jointCount * 16 * sizeof(float));
+    pose->joints     = (Transform*)arenaAlloc(&gArena, (pose->jointCount * sizeof(Transform)));
+    pose->matrices   = (float*)arenaAlloc(&gArena, (pose->jointCount * 16 * sizeof(float)));
     memset(pose->matrices, 0, pose->jointCount * 16 * sizeof(float));
     
     // default to identity transforms
@@ -999,19 +1002,25 @@ void pose_reset(Pose *pose, Skeleton *skel)
 }
 
 void
-Render(Renderer *r, Background *b, Model *m, Player *p, SDL_Window *w)
+Render(Background *b, Model *m, Player *p, SDL_Window *w)
 {
+    SDL_Log("Render started");
     p->AnimTime = SDL_GetTicks() * 0.001f;
     if(m->animCount > 1)
         sample_animation(&m->animations[1], p->AnimTime, &m->pose);
     eval_pose(&m->pose, &m->skeleton);
+    SDL_Log("eval pose finished");
     
-    SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(r->gpuDevice);
+    SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(gGPUDevice);
     SDL_GPUTexture *swapchain;
     SDL_WaitAndAcquireGPUSwapchainTexture(cmd, w, &swapchain, NULL, NULL);
     
-    RenderBackground(r, b, cmd, swapchain);
-    RenderModel(r, m, p, cmd, swapchain);
+    SDL_Log("render bg started");
+    RenderBackground(b, cmd, swapchain);
+    SDL_Log("render bg ended");
+    SDL_Log("render model started");
+    RenderModel(m, p, cmd, swapchain);
+    SDL_Log("render model ended");
     
     SDL_SubmitGPUCommandBuffer(cmd);
     
