@@ -8,12 +8,7 @@
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
 
-struct Arena
-{
-    uint8_t  *base;
-    size_t   size;
-    size_t   offset;
-};
+#include "shared.h"
 
 // Globals
 SDL_Window                      *gSDLWindow;
@@ -27,29 +22,11 @@ static int                      gDone;
 const int gWINDOW_WIDTH  = 1920 / 2;
 const int gWINDOW_HEIGHT = 1080 / 2;
 
-void
-arenaInit(Arena *a, void *buf, size_t size)
-{
-    a->base   = (uint8_t *)buf;
-    a->size   = size;
-    a->offset = 0;
-}
-
-void *
-arenaAlloc(Arena *a, size_t s)
-{
-    if(a->offset + s > a->size)
-        return NULL;
-    void *ptr = a->base + a->offset;
-    a->offset += s;
-    
-    return ptr;
-}
 
 #include "graphics.cpp"
 
 bool
-update(Player *p)
+Update(Player *p)
 {
     SDL_Log("update entered");
     SDL_Event e;
@@ -76,20 +53,8 @@ update(Player *p)
     if(keys[SDL_SCANCODE_D])     p->ModelRotY += 0.01f;
     
     SDL_Log("keyboard input passed");
+    
     return(true);
-}
-
-void
-loop(Background *b, Model *m, Player *p, SDL_Window *w)
-{
-    if (!update(p))
-    {
-        gDone = 1;
-    }
-    else
-    {
-        Render(b, m, p, w);
-    }
 }
 
 int
@@ -115,11 +80,19 @@ main(int argc, char** argv)
     LoadModel(&m);
     Player p = {};
     
+    pipelineObjects po = {};
+    
+    LinePipeline lp = {};
+    CreateLinePipeline(&lp);
+    
+    po.lp = &lp;
+    
     gDone = 0;
     while (!gDone)
     {
-        loop(&b, &m, &p, gSDLWindow);
-        
+        if(!Update(&p))
+            gDone = 1;
+        Render(&b, &m, &p, &po);
     }
     RendererDestroy(&b, &m);
     

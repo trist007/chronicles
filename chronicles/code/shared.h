@@ -1,22 +1,184 @@
-extern const int WINDOW_WIDTH;
-extern const int WINDOW_HEIGHT;
+/* date = March 31st 2026 1:58 pm */
 
-void pose_init(Pose *pose, Skeleton *skel)
+#ifndef SHARED_H
+#define SHARED_H
+
+#define MAX_DEBUG_LINES 100
+
+struct Vec2 { float u, v; };
+struct Vec3 { float x, y, z; };
+struct Vec4 { float x, y, z, w; };
+
+
+struct Vertex
 {
-    pose->jointCount = skel->jointCount;
-    pose->joints     = (Transform*)malloc(pose->jointCount * sizeof(Transform));
-    pose->matrices   = (float*)malloc(pose->jointCount * 16 * sizeof(float));
-    memset(pose->matrices, 0, pose->jointCount * 16 * sizeof(float));
+    Vec3 pos;
+    Vec3 normal;
+    Vec2 uv;
+    // skinning
+    int   joints[4];
+    float weights[4];
+};
+
+struct LineVertex
+{
+    Vec3 position;
+};
+
+struct LinePipeline
+{
+    SDL_GPUGraphicsPipeline                 *Pipeline;
+    SDL_GPUBuffer                           *LineVertexBuffer;
+    LineVertex                              LineVerts[MAX_DEBUG_LINES *  2];
+    int                                     LineVertCount;
+};
+
+struct pipelineObjects
+{
+    LinePipeline *lp;
+};
+
+struct Tri { int v[3]; };
+
+// per joint
+struct Joint
+{
+    float inverseBindMatrix[16];
+    int   parent;  // -1 if root
+    char  name[64];
+    Vec3  defaultTranslation;
+    Vec4  defaultRotation;
+    Vec3  defaultScale;
+};
+
+// animation keyframes
+struct Keyframe
+{
+    float time;
+    Vec4  value;  // vec3 for translation/scale, vec4 for rotation quaternion
+};
+
+struct AnimChannel
+{
+    int       jointIndex;
+    int       type;        // 0=translation, 1=rotation, 2=scale
+    Keyframe *keyframes;
+    int       keyframeCount;
+};
+
+struct Animation
+{
+    char        name[64];
+    AnimChannel *channels;
+    int          channelCount;
+    float        duration;
+};
+
+struct Primitive
+{
+    int vertOffset;
+    int triOffset;
+    int triCount;
+    unsigned int color;  // ARGB from material
+};
+
+// mesh
+struct Mesh
+{
+    Vertex    *verts;
+    int        vertCount;
+    Tri       *tris;
+    int        triCount;
+    Primitive  primitives[16];
+    int        primitiveCount;
+};
+
+// skeleton
+struct Skeleton
+{
+    Joint *joints;
+    int    jointCount;
+};
+
+struct Transform
+{
+    Vec3 translation;
+    Vec4 rotation;    // quaternion xyzw
+    Vec3 scale;
+};
+
+struct Pose
+{
+    Transform *joints;    // local space transforms
+    float     *matrices;  // final skinning matrices, jointCount * 16 floats
+    int        jointCount;
+};
+
+struct Background
+{
+    SDL_GPUTexture          *backgroundTexture;
+    SDL_GPUSampler          *backgroundSampler;
+    SDL_GPUGraphicsPipeline *backgroundPipeline;
+    int                     width;
+    int                     height;
+};
+
+// ################################################################################
+// Model
+// ################################################################################
+
+struct Model
+{
+    // CPU side
+    Mesh                      mesh;
+    Skeleton                  skeleton;
+    Animation                 *animations;
+    Pose                      pose;
+    int                       animCount;
     
-    // default to identity transforms
-    for(int i = 0; i < pose->jointCount; i++)
-    {
-        pose->joints[i].translation = skel->joints[i].defaultTranslation;
-        pose->joints[i].rotation    = skel->joints[i].defaultRotation;
-        pose->joints[i].scale       = skel->joints[i].defaultScale;
-    }
+    // GPU side
+    SDL_GPUBuffer             *vertexBuffer;
+    SDL_GPUBuffer             *indexBuffer;
+    SDL_GPUTexture            *depthTexture;  // though this arguably belongs in Renderer
+    SDL_GPUGraphicsPipeline   *pipeline; // same, could belong in Renderer
+};
+
+struct Player
+{
+    float AnimTime  = 0.0f;
+    float ModelX    = 0.0f;
+    float ModelY    = -1.09f;
+    float ModelZ    = 3.0f;
+    float ModelRotY = 0.0f;
+};
+
+struct Arena
+{
+    uint8_t  *base;
+    size_t   size;
+    size_t   offset;
+};
+
+extern Arena                            gArena;
+
+void
+arenaInit(Arena *a, void *buf, size_t size)
+{
+    a->base   = (uint8_t *)buf;
+    a->size   = size;
+    a->offset = 0;
 }
 
+void *
+arenaAlloc(Arena *a, size_t s)
+{
+    if(a->offset + s > a->size)
+        return NULL;
+    void *ptr = a->base + a->offset;
+    a->offset += s;
+    
+    return ptr;
+}
 
 inline float min(float a, float b)
 {
@@ -128,6 +290,124 @@ void read_uint(cgltf_accessor *acc, int index, unsigned int *out)
     cgltf_accessor_read_uint(acc, index, out, 1);
 }
 
+
+int find_joint_index(cgltf_data *data, cgltf_node *node)
+{
+    if(!data->skins) return -1;
+    cgltf_skin *skin = &data->skins[0];
+    for(int i = 0; i < (int)skin->joints_count; i++)
+        if(skin->joints[i] == node) return i;
+    return -1;
+}
+
+void extract_skeleton(cgltf_data *data, Skeleton *skel)
+{
+    if(!data->skins_count) return;
+    cgltf_skin *skin = &data->skins[0];
+    
+    skel->jointCount = (int)skin->joints_count;
+    skel->joints = (Joint*)arenaAlloc(&gArena, (skel->jointCount * sizeof(Joint)));
+    
+    for(int i = 0; i < skel->jointCount; i++)
+    {
+        Joint *j = &skel->joints[i];
+        cgltf_node *node = skin->joints[i];
+        
+        strncpy(j->name, node->name ? node->name : "unnamed", 63);
+        
+        // inverse bind matrix
+        if(skin->inverse_bind_matrices)
+            cgltf_accessor_read_float(skin->inverse_bind_matrices, i, j->inverseBindMatrix, 16);
+        else
+            mat4_identity(j->inverseBindMatrix);
+        
+        // store default local transform from node
+        if(node->has_translation)
+        {
+            j->defaultTranslation = {node->translation[0], node->translation[1], node->translation[2]};
+        }
+        else
+        {
+            j->defaultTranslation = {0,0,0};
+        }
+        
+        if(node->has_rotation)
+        {
+            j->defaultRotation = {node->rotation[0], node->rotation[1], node->rotation[2], node->rotation[3]};
+        }
+        else
+        {
+            j->defaultRotation = {0,0,0,1};
+        }
+        
+        if(node->has_scale)
+        {
+            j->defaultScale = {node->scale[0], node->scale[1], node->scale[2]};
+        }
+        else
+        {
+            j->defaultScale = {1,1,1};
+        }
+        
+        // find parent
+        j->parent = -1;
+        if(node->parent)
+            j->parent = find_joint_index(data, node->parent);
+    }
+}
+
+int path_to_type(cgltf_animation_path_type path)
+{
+    switch(path)
+    {
+        case cgltf_animation_path_type_translation: return 0;
+        case cgltf_animation_path_type_rotation:    return 1;
+        case cgltf_animation_path_type_scale:       return 2;
+        default: return -1;
+    }
+}
+
+void extract_animations(cgltf_data *data, Model *m)
+{
+    m->animCount  = (int)data->animations_count;
+    m->animations = (Animation*)arenaAlloc(&gArena, (m->animCount * sizeof(Animation)));
+    
+    for(int a = 0; a < m->animCount; a++)
+    {
+        cgltf_animation *src  = &data->animations[a];
+        Animation       *anim = &m->animations[a];
+        
+        strncpy(anim->name, src->name ? src->name : "unnamed", 63);
+        anim->channelCount = (int)src->channels_count;
+        anim->channels     = (AnimChannel*)arenaAlloc(&gArena, (anim->channelCount * sizeof(AnimChannel)));
+        anim->duration     = 0.0f;
+        
+        for(int c = 0; c < anim->channelCount; c++)
+        {
+            cgltf_animation_channel *src_ch = &src->channels[c];
+            cgltf_animation_sampler *samp   = src_ch->sampler;
+            AnimChannel             *ch     = &anim->channels[c];
+            
+            ch->type       = path_to_type(src_ch->target_path);
+            ch->jointIndex = find_joint_index(data, src_ch->target_node);
+            
+            int count        = (int)samp->input->count;
+            ch->keyframeCount = count;
+            ch->keyframes    = (Keyframe*)arenaAlloc(&gArena, (count * sizeof(Keyframe)));
+            
+            for(int k = 0; k < count; k++)
+            {
+                cgltf_accessor_read_float(samp->input,  k, &ch->keyframes[k].time,    1);
+                cgltf_accessor_read_float(samp->output, k, &ch->keyframes[k].value.x,
+                                          ch->type == 1 ? 4 : 3);  // rotation is vec4, others vec3
+                
+                if(ch->keyframes[k].time > anim->duration)
+                    anim->duration = ch->keyframes[k].time;
+            }
+        }
+    }
+}
+
 void extract_mesh(cgltf_data *data, Mesh *mesh)
 {
     // first pass: count total verts and tris across all primitives
@@ -142,8 +422,8 @@ void extract_mesh(cgltf_data *data, Mesh *mesh)
     
     mesh->vertCount = totalVerts;
     mesh->triCount  = totalTris;
-    mesh->verts = (Vertex*)malloc(totalVerts * sizeof(Vertex));
-    mesh->tris  = (Tri*)malloc(totalTris * sizeof(Tri));
+    mesh->verts = (Vertex*)arenaAlloc(&gArena, (totalVerts * sizeof(Vertex)));
+    mesh->tris  = (Tri*)arenaAlloc(&gArena, (totalTris * sizeof(Tri)));
     memset(mesh->verts, 0, totalVerts * sizeof(Vertex));
     
     int vertOffset = 0;
@@ -228,123 +508,6 @@ void extract_mesh(cgltf_data *data, Mesh *mesh)
     }
 }
 
-int find_joint_index(cgltf_data *data, cgltf_node *node)
-{
-    if(!data->skins) return -1;
-    cgltf_skin *skin = &data->skins[0];
-    for(int i = 0; i < (int)skin->joints_count; i++)
-        if(skin->joints[i] == node) return i;
-    return -1;
-}
-
-void extract_skeleton(cgltf_data *data, Skeleton *skel)
-{
-    if(!data->skins_count) return;
-    cgltf_skin *skin = &data->skins[0];
-    
-    skel->jointCount = (int)skin->joints_count;
-    skel->joints = (Joint*)malloc(skel->jointCount * sizeof(Joint));
-    
-    for(int i = 0; i < skel->jointCount; i++)
-    {
-        Joint *j = &skel->joints[i];
-        cgltf_node *node = skin->joints[i];
-        
-        strncpy(j->name, node->name ? node->name : "unnamed", 63);
-        
-        // inverse bind matrix
-        if(skin->inverse_bind_matrices)
-            cgltf_accessor_read_float(skin->inverse_bind_matrices, i, j->inverseBindMatrix, 16);
-        else
-            mat4_identity(j->inverseBindMatrix);
-        
-        // store default local transform from node
-        if(node->has_translation)
-        {
-            j->defaultTranslation = {node->translation[0], node->translation[1], node->translation[2]};
-        }
-        else
-        {
-            j->defaultTranslation = {0,0,0};
-        }
-        
-        if(node->has_rotation)
-        {
-            j->defaultRotation = {node->rotation[0], node->rotation[1], node->rotation[2], node->rotation[3]};
-        }
-        else
-        {
-            j->defaultRotation = {0,0,0,1};
-        }
-        
-        if(node->has_scale)
-        {
-            j->defaultScale = {node->scale[0], node->scale[1], node->scale[2]};
-        }
-        else
-        {
-            j->defaultScale = {1,1,1};
-        }
-        
-        // find parent
-        j->parent = -1;
-        if(node->parent)
-            j->parent = find_joint_index(data, node->parent);
-    }
-}
-
-int path_to_type(cgltf_animation_path_type path)
-{
-    switch(path)
-    {
-        case cgltf_animation_path_type_translation: return 0;
-        case cgltf_animation_path_type_rotation:    return 1;
-        case cgltf_animation_path_type_scale:       return 2;
-        default: return -1;
-    }
-}
-
-void extract_animations(cgltf_data *data, Model *m)
-{
-    m->animCount  = (int)data->animations_count;
-    m->animations = (Animation*)malloc(m->animCount * sizeof(Animation));
-    
-    for(int a = 0; a < m->animCount; a++)
-    {
-        cgltf_animation *src  = &data->animations[a];
-        Animation       *anim = &m->animations[a];
-        
-        strncpy(anim->name, src->name ? src->name : "unnamed", 63);
-        anim->channelCount = (int)src->channels_count;
-        anim->channels     = (AnimChannel*)malloc(anim->channelCount * sizeof(AnimChannel));
-        anim->duration     = 0.0f;
-        
-        for(int c = 0; c < anim->channelCount; c++)
-        {
-            cgltf_animation_channel *src_ch = &src->channels[c];
-            cgltf_animation_sampler *samp   = src_ch->sampler;
-            AnimChannel             *ch     = &anim->channels[c];
-            
-            ch->type       = path_to_type(src_ch->target_path);
-            ch->jointIndex = find_joint_index(data, src_ch->target_node);
-            
-            int count        = (int)samp->input->count;
-            ch->keyframeCount = count;
-            ch->keyframes    = (Keyframe*)malloc(count * sizeof(Keyframe));
-            
-            for(int k = 0; k < count; k++)
-            {
-                cgltf_accessor_read_float(samp->input,  k, &ch->keyframes[k].time,    1);
-                cgltf_accessor_read_float(samp->output, k, &ch->keyframes[k].value.x,
-                                          ch->type == 1 ? 4 : 3);  // rotation is vec4, others vec3
-                
-                if(ch->keyframes[k].time > anim->duration)
-                    anim->duration = ch->keyframes[k].time;
-            }
-        }
-    }
-}
-
 bool load_model(Model *m, const char *path)
 {
     cgltf_options options = {};
@@ -422,7 +585,7 @@ void sample_animation(Animation *anim, float time, Pose *pose)
 void eval_pose(Pose *pose, Skeleton *skel)
 {
     // world space matrices per joint, temp buffer
-    float *worldMats = (float*)alloca(skel->jointCount * 64);
+    float *worldMats = (float*)arenaAlloc(&gArena, (skel->jointCount * 64));
     
     for(int i = 0; i < skel->jointCount; i++)
     {
@@ -480,6 +643,17 @@ void mat4_rotation_y(float *m, float angle)
     m[10] =  cosf(angle);
 }
 
+void mat4_ortho(float *m, float left, float right, float bottom, float top)
+{
+    memset(m, 0, 64);
+    m[0]  =  2.0f / (right - left);
+    m[5]  =  2.0f / (top - bottom);
+    m[10] = -1.0f;
+    m[12] = -(right + left) / (right - left);
+    m[13] = -(top + bottom) / (top - bottom);
+    m[15] =  1.0f;
+}
+
 void
 debug_model_bounds(Mesh *mesh)
 {
@@ -495,3 +669,32 @@ debug_model_bounds(Mesh *mesh)
     SDL_Log("bounds x[%.2f, %.2f] y[%.2f, %.2f] z[%.2f, %.2f]", 
             minx,maxx, miny,maxy, minz,maxz);
 }
+
+void pose_init(Pose *pose, Skeleton *skel)
+{
+    pose->jointCount = skel->jointCount;
+    pose->joints     = (Transform*)arenaAlloc(&gArena, (pose->jointCount * sizeof(Transform)));
+    pose->matrices   = (float*)arenaAlloc(&gArena, (pose->jointCount * 16 * sizeof(float)));
+    memset(pose->matrices, 0, pose->jointCount * 16 * sizeof(float));
+    
+    // default to identity transforms
+    for(int i = 0; i < pose->jointCount; i++)
+    {
+        pose->joints[i].translation = skel->joints[i].defaultTranslation;
+        pose->joints[i].rotation    = skel->joints[i].defaultRotation;
+        pose->joints[i].scale       = skel->joints[i].defaultScale;
+    }
+}
+
+void pose_reset(Pose *pose, Skeleton *skel)
+{
+    memset(pose->matrices, 0, pose->jointCount * 16 * sizeof(float));
+    for(int i = 0; i < pose->jointCount; i++)
+    {
+        pose->joints[i].translation = skel->joints[i].defaultTranslation;
+        pose->joints[i].rotation    = skel->joints[i].defaultRotation;
+        pose->joints[i].scale       = skel->joints[i].defaultScale;
+    }
+}
+
+#endif //SHARED_H
