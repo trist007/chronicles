@@ -123,6 +123,15 @@ struct Background
     int                     height;
 };
 
+struct Text
+{
+    SDL_GPUTexture          *fontTexture;
+    SDL_GPUSampler          *fontSampler;
+    SDL_GPUGraphicsPipeline *fontPipeline;
+    int                     width;
+    int                     height;
+};
+
 // ################################################################################
 // Model
 // ################################################################################

@@ -29,6 +29,7 @@ RendererInit()
     return(0);
 }
 
+
 void
 LoadBackground(Background *b)
 {
@@ -523,12 +524,121 @@ CreateLinePipeline(LinePipeline *lp)
     lp->LineVertCount = 0;
 }
 
+void
+LoadFont(Text *t)
+{
+    // render text to surface on CPU
+    TTF_Font    *fontFile = TTF_OpenFont("../chronicles/fonts/liberation-mono.ttf", 17);
+    SDL_Color    red      = {255, 0, 0, 255};
+    SDL_Surface *font     = TTF_RenderText_Blended(fontFile, "testing", 0, red);
+    SDL_Surface *fontRGBA = SDL_ConvertSurface(font, SDL_PIXELFORMAT_ABGR8888);
+    SDL_DestroySurface(font);
+    TTF_CloseFont(fontFile);
+    
+    // upload to GPU texture
+    Uint32 fontSize = fontRGBA->w * fontRGBA->h * 4;
+    
+    SDL_GPUTextureCreateInfo texInfo       = {};
+    texInfo.type                           = SDL_GPU_TEXTURETYPE_2D;
+    texInfo.format                         = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    texInfo.usage                          = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    texInfo.width                          = fontRGBA->w;
+    texInfo.height                         = fontRGBA->h;
+    texInfo.layer_count_or_depth           = 1;
+    texInfo.num_levels                     = 1;
+    t->fontTexture                         = SDL_CreateGPUTexture(gGPUDevice, &texInfo);
+    t->width                               = fontRGBA->w;
+    t->height                              = fontRGBA->h;
+    
+    SDL_GPUTransferBufferCreateInfo tbInfo = {};
+    tbInfo.usage                           = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    tbInfo.size                            = fontSize;
+    SDL_GPUTransferBuffer *tb              = SDL_CreateGPUTransferBuffer(gGPUDevice, &tbInfo);
+    void *ptr                              = SDL_MapGPUTransferBuffer(gGPUDevice, tb, false);
+    memcpy(ptr, fontRGBA->pixels, fontSize);
+    SDL_UnmapGPUTransferBuffer(gGPUDevice, tb);
+    
+    SDL_GPUCommandBuffer *cmd              = SDL_AcquireGPUCommandBuffer(gGPUDevice);
+    SDL_GPUCopyPass      *cp               = SDL_BeginGPUCopyPass(cmd);
+    SDL_GPUTextureTransferInfo src         = {};
+    src.transfer_buffer                    = tb;
+    SDL_GPUTextureRegion dst               = {};
+    dst.texture                            = t->fontTexture;
+    dst.w                                  = fontRGBA->w;
+    dst.h                                  = fontRGBA->h;
+    dst.d                                  = 1;
+    SDL_UploadToGPUTexture(cp, &src, &dst, false);
+    SDL_EndGPUCopyPass(cp);
+    SDL_SubmitGPUCommandBuffer(cmd);
+    SDL_ReleaseGPUTransferBuffer(gGPUDevice, tb);
+    SDL_DestroySurface(fontRGBA);
+    
+    // sampler
+    SDL_GPUSamplerCreateInfo samplerInfo   = {};
+    samplerInfo.min_filter                 = SDL_GPU_FILTER_LINEAR;
+    samplerInfo.mag_filter                 = SDL_GPU_FILTER_LINEAR;
+    samplerInfo.address_mode_u             = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    samplerInfo.address_mode_v             = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    t->fontSampler                         = SDL_CreateGPUSampler(gGPUDevice, &samplerInfo);
+    
+    // pipeline
+    SDL_GPUShader *vert = CreateShader("../chronicles/shaders/font_vertex.dxil",
+                                       SDL_GPU_SHADERSTAGE_VERTEX, 1, 0);
+    SDL_GPUShader *frag = CreateShader("../chronicles/shaders/font_fragment.dxil",
+                                       SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 1);
+    
+    // need to enable blending
+    SDL_GPUColorTargetDescription colorDesc                    = {};
+    colorDesc.format                                           = SDL_GetGPUSwapchainTextureFormat(gGPUDevice, gSDLWindow);
+    colorDesc.blend_state.enable_blend                         = true;
+    colorDesc.blend_state.src_color_blendfactor                = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+    colorDesc.blend_state.dst_color_blendfactor                = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    colorDesc.blend_state.color_blend_op                       = SDL_GPU_BLENDOP_ADD;
+    colorDesc.blend_state.src_alpha_blendfactor                = SDL_GPU_BLENDFACTOR_ONE;
+    colorDesc.blend_state.dst_alpha_blendfactor                = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+    colorDesc.blend_state.alpha_blend_op                       = SDL_GPU_BLENDOP_ADD;
+    
+    SDL_GPUGraphicsPipelineCreateInfo pipeInfo                 = {};
+    pipeInfo.vertex_shader                                     = vert;
+    pipeInfo.fragment_shader                                   = frag;
+    pipeInfo.primitive_type                                    = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    pipeInfo.target_info.color_target_descriptions             = &colorDesc;
+    pipeInfo.target_info.num_color_targets                     = 1;
+    
+    t->fontPipeline = SDL_CreateGPUGraphicsPipeline(gGPUDevice, &pipeInfo);
+    
+    SDL_ReleaseGPUShader(gGPUDevice, vert);
+    SDL_ReleaseGPUShader(gGPUDevice, frag);
+}
+
 // ################################################################################
 // Render
 // ################################################################################
 
 void
-Render(Background *b, Model *m, Player *p, pipelineObjects *po)
+RenderText(Text *t, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain, float x, float y)
+{
+    SDL_GPUColorTargetInfo color = {};
+    color.texture                = swapchain;
+    color.load_op                = SDL_GPU_LOADOP_LOAD;
+    color.store_op               = SDL_GPU_STOREOP_STORE;
+    
+    SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(cmd, &color, 1, NULL);
+    SDL_BindGPUGraphicsPipeline(pass, t->fontPipeline);
+    
+    SDL_GPUTextureSamplerBinding binding = { t->fontTexture, t->fontSampler };
+    SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
+    
+    struct FontUniforms { float pos[2]; float size[2]; float screenSize[2]; };
+    FontUniforms u = { {x, y}, {(float)t->width, (float)t->height}, {(float)gWINDOW_WIDTH, (float)gWINDOW_HEIGHT} };
+    SDL_PushGPUVertexUniformData(cmd, 0, &u, sizeof(u));
+    
+    SDL_DrawGPUPrimitives(pass, 6, 1, 0, 0);
+    SDL_EndGPURenderPass(pass);
+}
+
+void
+Render(Background *b, Model *m, Player *p, pipelineObjects *po, Text *t)
 {
     SDL_Log("Render started");
     p->AnimTime = SDL_GetTicks() * 0.001f;
@@ -555,6 +665,7 @@ Render(Background *b, Model *m, Player *p, pipelineObjects *po)
     mat4_mul(mvp, vp, model);
     
     RenderModel(m, p, cmd, swapchain, mvp);
+    RenderText(t, cmd, swapchain, 10, 10);
     SDL_Log("render model ended");
     
     

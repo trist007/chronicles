@@ -4,11 +4,13 @@
 #include "SDL3/SDL.h"
 #include "SDL3/SDL_main.h"
 #include "SDL3_image/SDL_image.h"
+#include "SDL3_ttf/SDL_ttf.h"
 
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
 
 #include "shared.h"
+#include "graphics.cpp"
 
 // Globals
 SDL_Window                      *gSDLWindow;
@@ -21,9 +23,6 @@ static int                      gDone;
 
 const int gWINDOW_WIDTH  = 1920 / 2;
 const int gWINDOW_HEIGHT = 1080 / 2;
-
-
-#include "graphics.cpp"
 
 bool
 Update(Player *p)
@@ -64,6 +63,7 @@ main(int argc, char** argv)
     {
         return -1;
     }
+    TTF_Init();
     
     gSDLWindow = SDL_CreateWindow("SDL3 window", gWINDOW_WIDTH, gWINDOW_HEIGHT, 0);
     
@@ -79,6 +79,8 @@ main(int argc, char** argv)
     Model m = {};
     LoadModel(&m);
     Player p = {};
+    Text t = {};
+    LoadFont(&t);
     
     pipelineObjects po = {};
     
@@ -92,11 +94,12 @@ main(int argc, char** argv)
     {
         if(!Update(&p))
             gDone = 1;
-        Render(&b, &m, &p, &po);
+        Render(&b, &m, &p, &po, &t);
     }
     RendererDestroy(&b, &m);
     
     SDL_DestroyWindow(gSDLWindow);
+    TTF_Quit();
     SDL_Quit();
     
     return 0;
