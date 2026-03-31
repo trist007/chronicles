@@ -1,3 +1,5 @@
 build
 external
 .vs
+*.dxil
+*.json
