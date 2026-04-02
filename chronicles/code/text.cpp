@@ -1,4 +1,5 @@
 #include "shared.h"
+
 void
 LoadFontAtlas(font_atlas *atlas)
 {

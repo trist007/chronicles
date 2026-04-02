@@ -4,6 +4,7 @@
 #define SHARED_H
 
 #define MAX_DEBUG_LINES 100
+#define PI32 3.14159265359f
 
 struct Vec2 { float u, v; };
 struct Vec3 { float x, y, z; };
@@ -765,11 +766,13 @@ void pose_reset(Pose *pose, Skeleton *skel)
 
 struct Player
 {
-    float AnimTime  = 0.0f;
-    float ModelX    = 0.0f;
-    float ModelY    = -1.09f;
-    float ModelZ    = 3.0f;
-    float ModelRotY = 0.0f;
+    float AnimTime;
+    Vec3  position;
+    Vec3  velocity;
+    float yaw;
+    bool  isWalking;
+    bool  isIdle;
+    bool  isSearching;
 };
 
 struct GameState
