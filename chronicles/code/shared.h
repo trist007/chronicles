@@ -93,7 +93,10 @@ struct Mesh
     int        primitiveCount;
 };
 
-// skeleton
+// ################################################################################
+// Skeleton
+// ################################################################################
+
 struct Skeleton
 {
     Joint *joints;
@@ -123,14 +126,37 @@ struct Background
     int                     height;
 };
 
-struct Text
+// ################################################################################
+// Arena
+// ################################################################################
+
+struct Arena
 {
-    SDL_GPUTexture          *fontTexture;
-    SDL_GPUSampler          *fontSampler;
-    SDL_GPUGraphicsPipeline *fontPipeline;
-    int                     width;
-    int                     height;
+    uint8_t  *base;
+    size_t   size;
+    size_t   offset;
 };
+
+void
+arenaInit(Arena *a, void *buf, size_t size)
+{
+    a->base   = (uint8_t *)buf;
+    a->size   = size;
+    a->offset = 0;
+}
+
+void *
+arenaAlloc(Arena *a, size_t s)
+{
+    if(a->offset + s > a->size)
+        return NULL;
+    void *ptr = a->base + a->offset;
+    a->offset += s;
+    
+    return ptr;
+}
+
+Arena gArena;
 
 // ################################################################################
 // Model
@@ -152,42 +178,6 @@ struct Model
     SDL_GPUGraphicsPipeline   *pipeline; // same, could belong in Renderer
 };
 
-struct Player
-{
-    float AnimTime  = 0.0f;
-    float ModelX    = 0.0f;
-    float ModelY    = -1.09f;
-    float ModelZ    = 3.0f;
-    float ModelRotY = 0.0f;
-};
-
-struct Arena
-{
-    uint8_t  *base;
-    size_t   size;
-    size_t   offset;
-};
-
-extern Arena                            gArena;
-
-void
-arenaInit(Arena *a, void *buf, size_t size)
-{
-    a->base   = (uint8_t *)buf;
-    a->size   = size;
-    a->offset = 0;
-}
-
-void *
-arenaAlloc(Arena *a, size_t s)
-{
-    if(a->offset + s > a->size)
-        return NULL;
-    void *ptr = a->base + a->offset;
-    a->offset += s;
-    
-    return ptr;
-}
 
 inline float min(float a, float b)
 {
@@ -652,15 +642,78 @@ void mat4_rotation_y(float *m, float angle)
     m[10] =  cosf(angle);
 }
 
-void mat4_ortho(float *m, float left, float right, float bottom, float top)
+void
+mat4_lookat(float *m,
+            float eyeX,   float eyeY,   float eyeZ,
+            float targetX, float targetY, float targetZ,
+            float upX,    float upY,    float upZ)
 {
-    memset(m, 0, 64);
-    m[0]  =  2.0f / (right - left);
-    m[5]  =  2.0f / (top - bottom);
-    m[10] = -1.0f;
-    m[12] = -(right + left) / (right - left);
-    m[13] = -(top + bottom) / (top - bottom);
+    // forward vector (eye to target)
+    float fx = targetX - eyeX;
+    float fy = targetY - eyeY;
+    float fz = targetZ - eyeZ;
+    float flen = sqrtf(fx*fx + fy*fy + fz*fz);
+    fx /= flen;
+    fy /= flen;
+    fz /= flen;
+    
+    // right vector (forward cross up)
+    float rx = fy*upZ - fz*upY;
+    float ry = fz*upX - fx*upZ;
+    float rz = fx*upY - fy*upX;
+    float rlen = sqrtf(rx*rx + ry*ry + rz*rz);
+    rx /= rlen;
+    ry /= rlen;
+    rz /= rlen;
+    
+    // recompute up vector (right cross forward)
+    float ux = ry*fz - rz*fy;
+    float uy = rz*fx - rx*fz;
+    float uz = rx*fy - ry*fx;
+    
+    m[0]  =  rx;
+    m[1]  =  ux;
+    m[2]  = -fx;
+    m[3]  =  0.0f;
+    
+    m[4]  =  ry;
+    m[5]  =  uy;
+    m[6]  = -fy;
+    m[7]  =  0.0f;
+    
+    m[8]  =  rz;
+    m[9]  =  uz;
+    m[10] = -fz;
+    m[11] =  0.0f;
+    
+    m[12] = -(rx*eyeX + ry*eyeY + rz*eyeZ);
+    m[13] = -(ux*eyeX + uy*eyeY + uz*eyeZ);
+    m[14] =  (fx*eyeX + fy*eyeY + fz*eyeZ);
     m[15] =  1.0f;
+}
+
+void
+mat4_ortho(float *m, float left, float right, float bottom, float top, float nearZ, float farZ)
+{
+    m[0]  = 2.0f / (right - left);
+    m[1]  = 0.0f;
+    m[2]  = 0.0f;
+    m[3]  = 0.0f;
+    
+    m[4]  = 0.0f;
+    m[5]  = 2.0f / (top - bottom);
+    m[6]  = 0.0f;
+    m[7]  = 0.0f;
+    
+    m[8]  = 0.0f;
+    m[9]  = 0.0f;
+    m[10] = -2.0f / (farZ - nearZ);
+    m[11] = 0.0f;
+    
+    m[12] = -(right + left)   / (right - left);
+    m[13] = -(top   + bottom) / (top   - bottom);
+    m[14] = -(farZ  + nearZ)  / (farZ  - nearZ);
+    m[15] = 1.0f;
 }
 
 void
@@ -705,5 +758,91 @@ void pose_reset(Pose *pose, Skeleton *skel)
         pose->joints[i].scale       = skel->joints[i].defaultScale;
     }
 }
+
+// ################################################################################
+// GameState
+// ################################################################################
+
+struct Player
+{
+    float AnimTime  = 0.0f;
+    float ModelX    = 0.0f;
+    float ModelY    = -1.09f;
+    float ModelZ    = 3.0f;
+    float ModelRotY = 0.0f;
+};
+
+struct GameState
+{
+    Player player;
+    Model model;
+    Background bg;
+    const char *graphicsAPI;
+    
+};
+
+// ################################################################################
+// Graphics
+// ################################################################################
+
+
+int RendererInit();
+void LoadBackground(Background * b);
+void pose_alloc(Pose * pose, Skeleton * skel);
+void LoadModel(Model * m);
+void RendererDestroy(Background * b, Model * m);
+void RenderBackground(Background * b, SDL_GPUCommandBuffer * cmd, SDL_GPUTexture * swapchain);
+void RenderModel(Model * m, Player * p, SDL_GPUCommandBuffer * cmd, SDL_GPUTexture * swapchain, float * mvp);
+SDL_GPUShader * CreateShader(const char * path, SDL_GPUShaderStage stage, int numUniformBuffers, int numSamplers);
+SDL_GPUGraphicsPipeline * CreatePipeline(SDL_GPUShader * vertShader, SDL_GPUShader * fragShader, SDL_GPUVertexBufferDescription * vbDescs, int numVBDescs, SDL_GPUVertexAttribute * attrs, int numAttrs, SDL_GPUPrimitiveType topology, bool depthTest);
+void PushLine(LinePipeline * lp, Vec3 a, Vec3 b);
+void FlushLines(LinePipeline * lp, SDL_GPUCommandBuffer * cmd, SDL_GPUTexture * swapchain, float * ortho);
+void CreateLinePipeline(LinePipeline * lp);
+
+
+// ################################################################################
+// Text
+// ################################################################################
+
+struct Text
+{
+    SDL_GPUTexture          *fontTexture;
+    SDL_GPUSampler          *fontSampler;
+    SDL_GPUGraphicsPipeline *fontPipeline;
+    int                     width;
+    int                     height;
+};
+
+struct glyph
+{
+    float u0, v0; // top left UV
+    float u1, v1; // bottom right UV
+    int width;    // pixel width of this character
+    int height;   // pixel height
+};
+
+struct font_atlas
+{
+    SDL_GPUTexture           *texture;
+    SDL_GPUSampler           *sampler;
+    SDL_GPUGraphicsPipeline  *pipeline;
+    SDL_GPUBuffer            *vertexBuffer;
+    glyph                    glyphs[128];
+    int                      glyphHeight;
+    int                      atlasWidth;
+    int                      atlasHeight;
+};
+
+struct font_vertex
+{
+    float x, y;
+    float  u, v;
+};
+
+void LoadFontAtlas(font_atlas *atlas);
+void DrawText(font_atlas *atlas, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain,
+              const char *text, float x, float y, float r, float g, float b);
+
+
 
 #endif //SHARED_H
