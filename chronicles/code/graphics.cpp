@@ -126,8 +126,8 @@ LoadBackground(Background *b)
     size_t bgvertSize, bgfragSize;
     void *bgvertCode                                 = SDL_LoadFile("../chronicles/shaders/bg_vertex.dxil", &bgvertSize);
     void *bgfragCode                                 = SDL_LoadFile("../chronicles/shaders/bg_fragment.dxil", &bgfragSize);
-    //SDL_Log("bgvertCode: %p\n", bgvertCode);
-    //SDL_Log("bgfragCode: %p\n", bgfragCode);
+    SDL_Log("bgvertCode: %p\n", bgvertCode);
+    SDL_Log("bgfragCode: %p\n", bgfragCode);
     
     SDL_GPUShaderCreateInfo bgvertInfo               = {};
     bgvertInfo.code                                  = (Uint8*)bgvertCode;
@@ -137,7 +137,7 @@ LoadBackground(Background *b)
     bgvertInfo.stage                                 = SDL_GPU_SHADERSTAGE_VERTEX;
     bgvertInfo.num_uniform_buffers                   = 0;
     SDL_GPUShader *bgvertShader                      = SDL_CreateGPUShader(gGPUDevice, &bgvertInfo);
-    //SDL_Log("bgvertShader: %p error: %s", (void*)bgvertShader, SDL_GetError());
+    SDL_Log("bgvertShader: %p error: %s", (void*)bgvertShader, SDL_GetError());
     
     
     
@@ -147,14 +147,13 @@ LoadBackground(Background *b)
     bgfragInfo.entrypoint                            = "main";
     bgfragInfo.format                                = SDL_GPU_SHADERFORMAT_DXIL;
     bgfragInfo.stage                                 = SDL_GPU_SHADERSTAGE_FRAGMENT;
-    bgfragInfo.num_uniform_buffers                   = 0;
+    bgfragInfo.num_uniform_buffers                   = 1;
     bgfragInfo.num_samplers                          = 1;
     bgfragInfo.num_storage_textures                  = 0;
     bgfragInfo.num_storage_buffers                   = 0;
-    bgfragInfo.num_uniform_buffers                   = 0;
     
     SDL_GPUShader *bgfragShader                      = SDL_CreateGPUShader(gGPUDevice, &bgfragInfo);
-    //SDL_Log("bgfragShader: %p error: %s", (void*)bgfragShader, SDL_GetError());
+    SDL_Log("bgfragShader: %p error: %s", (void*)bgfragShader, SDL_GetError());
     
     //SDL_Log("GPU driver: %s", SDL_GetGPUDeviceDriver(gpuDevice));
     
@@ -338,6 +337,9 @@ RendererDestroy(Background *b, Model *m, pipelineObjects *po)
 void
 RenderBackground(Background *b, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain)
 {
+    float ambientLight = 0.2f;
+    //float ambientData[4] = { ambientLight, 0.0f, 0.0f, 0.0f };
+    
     SDL_GPUColorTargetInfo bgColor = {};
     bgColor.texture     = swapchain;
     bgColor.load_op     = SDL_GPU_LOADOP_CLEAR;
@@ -348,6 +350,9 @@ RenderBackground(Background *b, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapc
     SDL_BindGPUGraphicsPipeline(bgPass, b->backgroundPipeline);
     SDL_GPUTextureSamplerBinding bgBinding = { b->backgroundTexture, b->backgroundSampler };
     SDL_BindGPUFragmentSamplers(bgPass, 0, &bgBinding, 1);
+    
+    SDL_PushGPUFragmentUniformData(cmd, 0, &ambientLight, sizeof(float));  // here
+    
     SDL_DrawGPUPrimitives(bgPass, 3, 1, 0, 0);
     SDL_EndGPURenderPass(bgPass);
 }
@@ -355,6 +360,8 @@ RenderBackground(Background *b, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapc
 void
 RenderModel(Model *m, Player *p, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain, float *mvp)
 {
+    float ambientLight = 0.2f;
+    
     SDL_GPUColorTargetInfo modelColor = {};
     modelColor.texture  = swapchain;
     modelColor.load_op  = SDL_GPU_LOADOP_LOAD;  // keep background
@@ -378,6 +385,7 @@ RenderModel(Model *m, Player *p, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swap
     int uniformSize   = (16 + jointCount * 16) * sizeof(float);
     memcpy(m->uniformBuffer,      mvp,            64);
     memcpy(m->uniformBuffer + 16, m->pose.matrices, jointCount * 64);
+    
     SDL_PushGPUVertexUniformData(cmd, 0, m->uniformBuffer, uniformSize);
     
     for(int i = 0; i < m->mesh.primitiveCount; i++)  // or primitiveCount if that's on the struct
@@ -386,7 +394,7 @@ RenderModel(Model *m, Player *p, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swap
         float red = ((prim->color >> 0)  & 0xff) / 255.0f;
         float green = ((prim->color >> 8)  & 0xff) / 255.0f;
         float blue = ((prim->color >> 16) & 0xff) / 255.0f;
-        float col[4] = { red, green, blue, 1.0f };
+        float col[5] = { red, green, blue, 1.0f, ambientLight };
         SDL_PushGPUFragmentUniformData(cmd, 0, col, sizeof(col));
         SDL_DrawGPUIndexedPrimitives(pass, prim->triCount * 3, 1, prim->triOffset * 3, 0, 0);
     }
