@@ -9,7 +9,6 @@ Update(Player *p, float dt)
     
     const bool *keys = SDL_GetKeyboardState(NULL);
     
-    SDL_Log("update entered");
     SDL_Event e;
     if (SDL_PollEvent(&e))
     {
@@ -91,15 +90,12 @@ Update(Player *p, float dt)
     p->position.x += p->velocity.x * dt;
     p->position.z += p->velocity.z * dt;
     
-    SDL_Log("keyboard input passed");
-    
     return(true);
 }
 
 void
 Render(GameState *gamestate, pipelineObjects *po, font_atlas *f)
 {
-    SDL_Log("Render started");
     // NOTE(trist007): worth noting that SDL_GetTicks returns an ever increased Uint32
     // so after roughly 49.7 days it wraps back to near zero but for AnimTime it should
     // have much effect
@@ -111,21 +107,25 @@ Render(GameState *gamestate, pipelineObjects *po, font_atlas *f)
     else
         sample_animation(&gamestate->model.animations[1],
                          gamestate->player.AnimTime, &gamestate->model.pose);
-    eval_pose(&gamestate->model.pose, &gamestate->model.skeleton);
-    SDL_Log("eval pose finished");
+    eval_pose(&gamestate->model.pose, &gamestate->model.skeleton, gamestate->model.worldMats);
     
     SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(gGPUDevice);
     SDL_GPUTexture *swapchain;
     SDL_WaitAndAcquireGPUSwapchainTexture(cmd, gSDLWindow, &swapchain, NULL, NULL);
+    if(swapchain == NULL)
+    {
+        SDL_CancelGPUCommandBuffer(cmd);
+        return;
+    }
     
-    SDL_Log("render bg started");
     RenderBackground(&gamestate->bg, cmd, swapchain);
-    SDL_Log("render bg ended");
-    SDL_Log("render model started");
     
     // build model * view * projection mvp
     float proj[16], view[16], model[16], vp[16], mvp[16];
     float trans[16], rot[16];
+    float identity[16];
+    
+    mat4_identity(identity);
     
     float aspect = (float)gWINDOW_WIDTH / gWINDOW_HEIGHT;
     
@@ -144,14 +144,14 @@ Render(GameState *gamestate, pipelineObjects *po, font_atlas *f)
                 0.0f,   1.0f, 0.0f);   // up vector
     
     // combine proj and view
-    mat4_mul(vp, proj, view);
+    mat4_mul(vp, proj, view);  // vp = proj * view
     
     // player - translate then rotate
     mat4_translation(trans, gamestate->player.position.x,
                      gamestate->player.position.y, gamestate->player.position.z); // model moves
     mat4_rotation_y(rot, gamestate->player.yaw);
     mat4_mul(model, trans, rot);
-    mat4_mul(mvp, vp, model);
+    mat4_mul(mvp, vp, model);  // mvp = vp * model
     RenderModel(&gamestate->model, &gamestate->player, cmd, swapchain, mvp);
     
     /*
@@ -183,17 +183,15 @@ Render(GameState *gamestate, pipelineObjects *po, font_atlas *f)
     snprintf(buf, sizeof(buf), "Graphics AP: %s", gamestate->graphicsAPI);
     DrawText(f, cmd, swapchain, buf, 10.0f, 110.0f, 1.0f, 0.0f, 0.0f);
     
-    SDL_Log("render model ended");
     
+    // wall 0
+    PushLine(&po->lp, {-7.85f, 0.0f, 6.95f}, {4.88f, 0.0f, 4.82f});
+    // wall 1
+    PushLine(&po->lp, {4.88f, 0.0f, 4.82f}, {4.77f, 0.0f, 9.19f});
+    // wall 2
+    PushLine(&po->lp, {4.77f, 0.0f, 9.18f}, {-5.49f, 0.0f, 10.19f});
     
-    PushLine(po->lp,
-             { 0.9f, 0.0f, 0.3f },
-             {-0.9f, 0.0f,-0.7f }
-             );
-    
-    float ortho[16];
-    mat4_ortho(ortho, 0, gWINDOW_WIDTH, gWINDOW_HEIGHT, 0, -1.0f, 1.0f);
-    FlushLines(po->lp, cmd, swapchain, ortho);
+    FlushLines(&po->lp, cmd, swapchain, vp);
     
     SDL_SubmitGPUCommandBuffer(cmd);
     

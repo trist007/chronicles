@@ -29,6 +29,7 @@ struct LineVertex
 struct LinePipeline
 {
     SDL_GPUGraphicsPipeline                 *Pipeline;
+    SDL_GPUTransferBuffer                   *transferBuffer;              
     SDL_GPUBuffer                           *LineVertexBuffer;
     LineVertex                              LineVerts[MAX_DEBUG_LINES *  2];
     int                                     LineVertCount;
@@ -36,7 +37,7 @@ struct LinePipeline
 
 struct pipelineObjects
 {
-    LinePipeline *lp;
+    LinePipeline lp;
 };
 
 struct Tri { int v[3]; };
@@ -177,6 +178,11 @@ struct Model
     SDL_GPUBuffer             *indexBuffer;
     SDL_GPUTexture            *depthTexture;  // though this arguably belongs in Renderer
     SDL_GPUGraphicsPipeline   *pipeline; // same, could belong in Renderer
+    
+    // Storage
+    float                     *uniformBuffer;
+    float                     *worldMats;
+    int                       jointCount;
 };
 
 
@@ -582,11 +588,9 @@ void sample_animation(Animation *anim, float time, Pose *pose)
     }
 }
 
-void eval_pose(Pose *pose, Skeleton *skel)
+void eval_pose(Pose *pose, Skeleton *skel, float *worldMats)
 {
     // world space matrices per joint, temp buffer
-    float *worldMats = (float*)arenaAlloc(&gArena, (skel->jointCount * 64));
-    
     for(int i = 0; i < skel->jointCount; i++)
     {
         if(!pose->joints)
@@ -781,7 +785,7 @@ struct GameState
     Model model;
     Background bg;
     const char *graphicsAPI;
-    
+    pipelineObjects po;
 };
 
 // ################################################################################

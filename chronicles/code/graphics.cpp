@@ -3,6 +3,9 @@
 extern const int gWINDOW_WIDTH;
 extern const int gWINDOW_HEIGHT;
 
+// NOTE(trist007): on my shaders I need to use column vectors so mul(matrix, vector) is always what
+// I want return mul(mvp, float4(pos, 1.0)); so mvp is world space -> camera space -> clip space
+
 // ################################################################################
 // Renderer
 // ################################################################################
@@ -11,6 +14,12 @@ int
 RendererInit(GameState *gamestate)
 {
     // Create GPUDevice for hardware acceleration
+    /*
+    SDL_GPUDevice * SDL_CreateGPUDevice(
+                                        SDL_GPUShaderFormat format_flags,
+                                        bool debug_mode,
+                                        const char *name);
+*/
     gGPUDevice = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_MSL,
                                      true, NULL);
     if(!gGPUDevice)
@@ -307,13 +316,16 @@ LoadModel(Model *m)
 }
 
 void
-RendererDestroy(Background *b, Model *m)
+RendererDestroy(Background *b, Model *m, pipelineObjects *po)
 {
     SDL_ReleaseGPUBuffer(gGPUDevice, m->vertexBuffer);
     SDL_ReleaseGPUBuffer(gGPUDevice, m->indexBuffer);
     SDL_ReleaseGPUTexture(gGPUDevice, m->depthTexture);
     SDL_ReleaseGPUTexture(gGPUDevice, b->backgroundTexture);
     SDL_ReleaseGPUSampler(gGPUDevice, b->backgroundSampler);
+    SDL_ReleaseGPUTransferBuffer(gGPUDevice, po->lp.transferBuffer);
+    SDL_ReleaseGPUBuffer(gGPUDevice, po->lp.LineVertexBuffer);     
+    SDL_ReleaseGPUGraphicsPipeline(gGPUDevice, po->lp.Pipeline);   
     SDL_ReleaseGPUGraphicsPipeline(gGPUDevice, b->backgroundPipeline);
     SDL_ReleaseGPUGraphicsPipeline(gGPUDevice, m->pipeline);
     SDL_DestroyGPUDevice(gGPUDevice);
@@ -343,7 +355,6 @@ RenderBackground(Background *b, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapc
 void
 RenderModel(Model *m, Player *p, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain, float *mvp)
 {
-    SDL_Log("Inside RenderModel");
     SDL_GPUColorTargetInfo modelColor = {};
     modelColor.texture  = swapchain;
     modelColor.load_op  = SDL_GPU_LOADOP_LOAD;  // keep background
@@ -357,7 +368,6 @@ RenderModel(Model *m, Player *p, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swap
     
     SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(cmd, &modelColor, 1, &depth);
     SDL_BindGPUGraphicsPipeline(pass, m->pipeline);
-    SDL_Log("begin gpurenderpass");
     
     SDL_GPUBufferBinding vb = { m->vertexBuffer, 0 };
     SDL_BindGPUVertexBuffers(pass, 0, &vb, 1);
@@ -366,10 +376,9 @@ RenderModel(Model *m, Player *p, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swap
     
     int jointCount    = m->skeleton.jointCount;
     int uniformSize   = (16 + jointCount * 16) * sizeof(float);
-    float *uniforms   = (float*)alloca(uniformSize);
-    memcpy(uniforms,      mvp,            64);
-    memcpy(uniforms + 16, m->pose.matrices, jointCount * 64);
-    SDL_PushGPUVertexUniformData(cmd, 0, uniforms, uniformSize);
+    memcpy(m->uniformBuffer,      mvp,            64);
+    memcpy(m->uniformBuffer + 16, m->pose.matrices, jointCount * 64);
+    SDL_PushGPUVertexUniformData(cmd, 0, m->uniformBuffer, uniformSize);
     
     for(int i = 0; i < m->mesh.primitiveCount; i++)  // or primitiveCount if that's on the struct
     {
@@ -461,29 +470,22 @@ PushLine(LinePipeline *lp, Vec3 a, Vec3 b)
 }
 
 void
-FlushLines(LinePipeline *lp, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain, float *ortho)
+FlushLines(LinePipeline *lp, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain, float *vp)
 {
     if(lp->LineVertCount == 0)
         return;
     
     // Upload
-    SDL_GPUTransferBufferCreateInfo tbInfo = {};
-    tbInfo.usage                           = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-    tbInfo.size                            = lp->LineVertCount * sizeof(LineVertex);
-    
-    SDL_GPUTransferBuffer *tb              = SDL_CreateGPUTransferBuffer(gGPUDevice, &tbInfo);
-    
-    void *ptr                              = SDL_MapGPUTransferBuffer(gGPUDevice, tb, false);
+    void *ptr                              = SDL_MapGPUTransferBuffer(gGPUDevice, lp->transferBuffer, false);
     memcpy(ptr, lp->LineVerts, lp->LineVertCount * sizeof(LineVertex));
-    SDL_UnmapGPUTransferBuffer(gGPUDevice, tb);
+    SDL_UnmapGPUTransferBuffer(gGPUDevice, lp->transferBuffer);
     
     SDL_GPUCopyPass *cp                    = SDL_BeginGPUCopyPass(cmd);
-    SDL_GPUTransferBufferLocation src      = { tb, 0 };
+    SDL_GPUTransferBufferLocation src      = { lp->transferBuffer, 0 };
     SDL_GPUBufferRegion dst                = { lp->LineVertexBuffer, 0, (Uint32)(lp->LineVertCount * sizeof(LineVertex)) };
     
     SDL_UploadToGPUBuffer(cp, &src, &dst, false);
     SDL_EndGPUCopyPass(cp);
-    SDL_ReleaseGPUTransferBuffer(gGPUDevice, tb);
     
     // Draw
     SDL_GPUColorTargetInfo color           = {};
@@ -498,8 +500,8 @@ FlushLines(LinePipeline *lp, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchai
     SDL_GPUBufferBinding vb                = { lp->LineVertexBuffer, 0 };
     SDL_BindGPUVertexBuffers(pass, 0, &vb, 1);
     
-    // want mvp so the line can exist in 3D world space
-    SDL_PushGPUVertexUniformData(cmd, 0, ortho, 64);
+    // want vp so the line can exist in 3D world space
+    SDL_PushGPUVertexUniformData(cmd, 0, vp, 64);
     
     SDL_DrawGPUPrimitives(pass, lp->LineVertCount, 1, 0, 0);
     SDL_EndGPURenderPass(pass);
@@ -510,6 +512,11 @@ FlushLines(LinePipeline *lp, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchai
 void
 CreateLinePipeline(LinePipeline *lp)
 {
+    SDL_GPUTransferBufferCreateInfo tbInfo = {};
+    tbInfo.usage                           = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    tbInfo.size                            = MAX_DEBUG_LINES * 2 * sizeof(LineVertex);
+    lp->transferBuffer                     = SDL_CreateGPUTransferBuffer(gGPUDevice, &tbInfo);
+    
     SDL_GPUShader *vert = CreateShader("../chronicles/shaders/line_vertex.dxil",
                                        SDL_GPU_SHADERSTAGE_VERTEX, 1, 0);
     
@@ -535,36 +542,3 @@ CreateLinePipeline(LinePipeline *lp)
     
     lp->LineVertCount = 0;
 }
-
-// ################################################################################
-// Text
-// ################################################################################
-
-
-// ################################################################################
-// Render
-// ################################################################################
-
-/*
-void
-RenderText(Text *t, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain, float x, float y)
-{
-    SDL_GPUColorTargetInfo color = {};
-    color.texture                = swapchain;
-    color.load_op                = SDL_GPU_LOADOP_LOAD;
-    color.store_op               = SDL_GPU_STOREOP_STORE;
-    
-    SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(cmd, &color, 1, NULL);
-    SDL_BindGPUGraphicsPipeline(pass, t->fontPipeline);
-    
-    SDL_GPUTextureSamplerBinding binding = { t->fontTexture, t->fontSampler };
-    SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
-    
-    struct FontUniforms { float pos[2]; float size[2]; float screenSize[2]; };
-    FontUniforms u = { {x, y}, {(float)t->width, (float)t->height}, {(float)gWINDOW_WIDTH, (float)gWINDOW_HEIGHT} };
-    SDL_PushGPUVertexUniformData(cmd, 0, &u, sizeof(u));
-    
-    SDL_DrawGPUPrimitives(pass, 6, 1, 0, 0);
-    SDL_EndGPURenderPass(pass);
-}
-*/
