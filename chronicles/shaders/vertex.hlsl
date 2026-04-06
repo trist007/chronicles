@@ -8,7 +8,9 @@ struct VSInput
 
 struct VSOutput
 {
-    float4 pos : SV_Position;
+    float4       pos : SV_Position;
+    float3  worldPos : TEXCOORD0;
+    float3    normal : TEXCOORD1;
 };
 
 cbuffer Uniforms : register(b0, space1)
@@ -26,7 +28,12 @@ VSOutput main(VSInput input)
         + input.weights.z * skinMatrices[input.joints.z]
         + input.weights.w * skinMatrices[input.joints.w];
     
-    output.pos = mul(mvp, mul(skin, float4(input.pos, 1.0)));
+    float4 skinnedPos = mul(skin, float4(input.pos, 1.0));
+    output.pos = mul(mvp, skinnedPos);
+    output.worldPos = skinnedPos.xyz;
+    output.normal = mul((float3x3)skin, input.normal);
+    
+    //output.pos = mul(mvp, mul(skin, float4(input.pos, 1.0)));
     return output;
 }
 

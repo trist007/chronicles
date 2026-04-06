@@ -360,7 +360,10 @@ RenderBackground(Background *b, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapc
 void
 RenderModel(Model *m, Player *p, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain, float *mvp)
 {
+    // Add a point light at the lightPos
     float ambientLight = 0.2f;
+    float lightPos[3] = { 3.3f, 0.0f, 1.0f };
+    float lightRadius = 10.0f;
     
     SDL_GPUColorTargetInfo modelColor = {};
     modelColor.texture  = swapchain;
@@ -394,7 +397,8 @@ RenderModel(Model *m, Player *p, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swap
         float red = ((prim->color >> 0)  & 0xff) / 255.0f;
         float green = ((prim->color >> 8)  & 0xff) / 255.0f;
         float blue = ((prim->color >> 16) & 0xff) / 255.0f;
-        float col[5] = { red, green, blue, 1.0f, ambientLight };
+        float col[9] = { red, green, blue, 1.0f, ambientLight,
+            lightPos[0], lightPos[1], lightPos[2], lightRadius };
         SDL_PushGPUFragmentUniformData(cmd, 0, col, sizeof(col));
         SDL_DrawGPUIndexedPrimitives(pass, prim->triCount * 3, 1, prim->triOffset * 3, 0, 0);
     }
