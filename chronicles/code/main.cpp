@@ -61,6 +61,7 @@ main(int argc, char** argv)
     arenaInit(&gArena, perm, sizeof(perm));
     
     GameState gamestate = {};
+    gamestate.lightPos = { 3.3f, 0.0f, 1.0f };
     RendererInit(&gamestate);
     
     LoadBackground(&gamestate.bg);
@@ -91,7 +92,7 @@ main(int argc, char** argv)
         // NOTE(trist007): if ESCAPE is hit, then set gDone to 1 and quit
         if(!Update(&gamestate.player, dt))
             gDone = 1;
-        Render(&gamestate, &gamestate.po, &gAtlas);
+        Render(&gamestate, &gAtlas);
     }
     
     RendererDestroy(&gamestate.bg, &gamestate.model, &gamestate.po);

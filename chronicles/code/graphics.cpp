@@ -358,11 +358,11 @@ RenderBackground(Background *b, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapc
 }
 
 void
-RenderModel(Model *m, Player *p, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain, float *mvp)
+RenderModel(Model *m, Player *p, Vec3 *lightPos, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain, float *mvp)
 {
     // Add a point light at the lightPos
-    float ambientLight = 0.2f;
-    float lightPos[3] = { 3.3f, 0.0f, 1.0f };
+    float ambientLight = 0.8f;
+    //float lightPos[3] = { 3.3f, 0.0f, 1.0f };
     float lightRadius = 10.0f;
     
     SDL_GPUColorTargetInfo modelColor = {};
@@ -398,7 +398,7 @@ RenderModel(Model *m, Player *p, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swap
         float green = ((prim->color >> 8)  & 0xff) / 255.0f;
         float blue = ((prim->color >> 16) & 0xff) / 255.0f;
         float col[9] = { red, green, blue, 1.0f, ambientLight,
-            lightPos[0], lightPos[1], lightPos[2], lightRadius };
+            lightPos->x, lightPos->y, lightPos->z, lightRadius };
         SDL_PushGPUFragmentUniformData(cmd, 0, col, sizeof(col));
         SDL_DrawGPUIndexedPrimitives(pass, prim->triCount * 3, 1, prim->triOffset * 3, 0, 0);
     }
@@ -469,6 +469,53 @@ SDL_GPUGraphicsPipeline *CreatePipeline(
     pipeInfo.target_info.num_color_targets = 1;
     
     return(SDL_CreateGPUGraphicsPipeline(gGPUDevice, &pipeInfo));
+}
+
+void
+PushCircle(LinePipeline *lp, Vec3 center, float radius, int segments)
+{
+    for(int i = 0;
+        i < segments;
+        i++)
+    {
+        float a0 = (float)i       / segments * 2.0f * PI32;
+        float a1 = (float)(i + 1) / segments * 2.0f * PI32;
+        
+        Vec3 p0 = { center.x + cosf(a0) * radius,
+            center.y + sinf(a0) * radius,
+            center.z };
+        
+        Vec3 p1 = { center.x + cosf(a1) * radius,
+            center.y + sinf(a1) * radius,
+            center.z };
+        
+        PushLine(lp, p0, p1);
+    }
+}
+
+void
+PushFilledCircle(LinePipeline *lp, Vec3 center, float radius, int segments)
+{
+    for(int i = 0;
+        i < segments;
+        i++)
+    {
+        float a0 = (float)i       / segments * 2.0f * PI32;
+        float a1 = (float)(i + 1) / segments * 2.0f * PI32;
+        
+        Vec3 p0 = { center.x + cosf(a0) * radius,
+            center.y + sinf(a0) * radius,
+            center.z };
+        
+        Vec3 p1 = { center.x + cosf(a1) * radius,
+            center.y + sinf(a1) * radius,
+            center.z };
+        
+        // outer edge
+        PushLine(lp, p0, p1);
+        // spoke from center to edge
+        PushLine(lp, center, p0);
+    }
 }
 
 void

@@ -94,7 +94,7 @@ Update(Player *p, float dt)
 }
 
 void
-Render(GameState *gamestate, pipelineObjects *po, font_atlas *f)
+Render(GameState *gamestate, font_atlas *f)
 {
     // NOTE(trist007): worth noting that SDL_GetTicks returns an ever increased Uint32
     // so after roughly 49.7 days it wraps back to near zero but for AnimTime it should
@@ -119,6 +119,9 @@ Render(GameState *gamestate, pipelineObjects *po, font_atlas *f)
     }
     
     RenderBackground(&gamestate->bg, cmd, swapchain);
+    // draw circle for lightPos
+    //PushCircle(&gamestate->po.lp, gamestate->lightPos, 0.25f, 32);
+    PushFilledCircle(&gamestate->po.lp, gamestate->lightPos, 0.25f, 32);
     
     // build model * view * projection mvp
     float proj[16], view[16], model[16], vp[16], mvp[16];
@@ -152,7 +155,7 @@ Render(GameState *gamestate, pipelineObjects *po, font_atlas *f)
     mat4_rotation_y(rot, gamestate->player.yaw);
     mat4_mul(model, trans, rot);
     mat4_mul(mvp, vp, model);  // mvp = vp * model
-    RenderModel(&gamestate->model, &gamestate->player, cmd, swapchain, mvp);
+    RenderModel(&gamestate->model, &gamestate->player, &gamestate->lightPos, cmd, swapchain, mvp);
     
     /*
     // enemies
@@ -185,13 +188,13 @@ Render(GameState *gamestate, pipelineObjects *po, font_atlas *f)
     
     
     // wall 0
-    PushLine(&po->lp, {-7.85f, 0.0f, 6.95f}, {4.88f, 0.0f, 4.82f});
+    PushLine(&gamestate->po.lp, {-7.85f, 0.0f, 6.95f}, {4.88f, 0.0f, 4.82f});
     // wall 1
-    PushLine(&po->lp, {4.88f, 0.0f, 4.82f}, {4.77f, 0.0f, 9.19f});
+    PushLine(&gamestate->po.lp, {4.88f, 0.0f, 4.82f}, {4.77f, 0.0f, 9.19f});
     // wall 2
-    PushLine(&po->lp, {4.77f, 0.0f, 9.18f}, {-5.49f, 0.0f, 10.19f});
+    //PushLine(&po->lp, {4.77f, 0.0f, 9.18f}, {-5.49f, 0.0f, 10.19f});
     
-    FlushLines(&po->lp, cmd, swapchain, vp);
+    FlushLines(&gamestate->po.lp, cmd, swapchain, vp);
     
     SDL_SubmitGPUCommandBuffer(cmd);
     

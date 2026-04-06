@@ -786,6 +786,9 @@ struct GameState
     Background bg;
     const char *graphicsAPI;
     pipelineObjects po;
+    
+    // light
+    Vec3 lightPos;
 };
 
 // ################################################################################
@@ -799,7 +802,7 @@ void pose_alloc(Pose * pose, Skeleton * skel);
 void LoadModel(Model * m);
 void RendererDestroy(Background * b, Model * m);
 void RenderBackground(Background * b, SDL_GPUCommandBuffer * cmd, SDL_GPUTexture * swapchain);
-void RenderModel(Model * m, Player * p, SDL_GPUCommandBuffer * cmd, SDL_GPUTexture * swapchain, float * mvp);
+void RenderModel(Model * m, Player * p, Vec3 lightPos, SDL_GPUCommandBuffer * cmd, SDL_GPUTexture * swapchain, float * mvp);
 SDL_GPUShader * CreateShader(const char * path, SDL_GPUShaderStage stage, int numUniformBuffers, int numSamplers);
 SDL_GPUGraphicsPipeline * CreatePipeline(SDL_GPUShader * vertShader, SDL_GPUShader * fragShader, SDL_GPUVertexBufferDescription * vbDescs, int numVBDescs, SDL_GPUVertexAttribute * attrs, int numAttrs, SDL_GPUPrimitiveType topology, bool depthTest);
 void PushLine(LinePipeline * lp, Vec3 a, Vec3 b);
