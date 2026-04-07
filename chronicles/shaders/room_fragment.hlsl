@@ -9,14 +9,14 @@ float4 main(float4 pos : SV_Position, float3 worldPos : TEXCOORD0, float3 normal
 {
     float3 lightPos   = lightPosAndAmbient.xyz;
     float ambient     = lightPosAndAmbient.w;
-    float lightRadius = lightRadius.x;
+    float radius      = lightRadiusPad.x;
     
     float3 n          = normalize(normal);
     float3 toLight    = lightPos - worldPos;
     float dist        = length(toLight);
     float3 l          = toLight / dist;
     
-    float atten       = 1.0 - clamp(dist / lightRadius, 0.0, 1.0);
+    float atten       = 1.0 - clamp(dist / radius, 0.0, 1.0);
     float diffuse     = max(dot(n, l), 0.0) * atten;
     
     float3 lit        = color.rgb * (ambient + diffuse);

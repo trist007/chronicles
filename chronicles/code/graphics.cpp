@@ -280,8 +280,8 @@ void
 RenderRoom(Model *m, Vec3 *lightPos, SDL_GPUCommandBuffer *cmd,
            SDL_GPUTexture *swapchain, float *vp)
 {
-    float ambientLight = 1.0f;
-    float lightRadius  = 10.0f;
+    float ambientLight = 0.15f;
+    float lightRadius  = 15.0f;
     
     SDL_GPUColorTargetInfo color = {};
     color.texture                = swapchain;
