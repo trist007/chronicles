@@ -280,11 +280,12 @@ void
 RenderRoom(Model *m, Vec3 *lightPos, SDL_GPUCommandBuffer *cmd,
            SDL_GPUTexture *swapchain, float *vp)
 {
-    float ambientLight = 0.15f;
-    float lightRadius  = 15.0f;
+    float ambientLight = 0.7f;
+    float lightRadius  = 4.0f;
     
     // rotate the room clockwise by 45 degrees
-    float angle = -PI32 / 4.0f; // -45 degrees
+    //float angle = -PI32 / 4.0f; // -45 degrees
+    float angle = -PI32 / 3.0f; // -60 degrees
     float c = cosf(angle);
     float s = sinf(angle);
     
@@ -527,9 +528,9 @@ void
 RenderModel(Model *m, Player *p, Vec3 *lightPos, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain, float *mvp)
 {
     // Add a point light at the lightPos
-    float ambientLight = 0.8f;
+    float ambientLight = 0.7f;
     //float lightPos[3] = { 3.3f, 0.0f, 1.0f };
-    float lightRadius = 10.0f;
+    float lightRadius = 15.0f;
     
     SDL_GPUColorTargetInfo modelColor = {};
     modelColor.texture  = swapchain;

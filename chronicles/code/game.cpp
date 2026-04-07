@@ -142,10 +142,10 @@ Render(GameState *gamestate, font_atlas *f)
     // alone in the dark mode
     
     mat4_lookat(view,
-                -0.65f, 7.0f, 14.0f, // camera position
-                -0.65f, 0.0f, 4.65f, // look target
+                -0.65f, 7.0f, 11.0f, // camera position
+                -0.65f, 2.0f, 4.65f, // look target
                 0.0f,   1.0f, 0.0f);   // up vector
-
+    
     // combine proj and view
     mat4_mul(vp, proj, view);  // vp = proj * view
     

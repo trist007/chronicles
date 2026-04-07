@@ -61,12 +61,12 @@ main(int argc, char** argv)
     arenaInit(&gArena, perm, sizeof(perm));
     
     GameState gamestate = {};
-    gamestate.lightPos = { 3.3f, 0.0f, 1.0f };
+    gamestate.lightPos = { 4.5f, 0.0f, -5.0f };
     RendererInit(&gamestate);
     
     //LoadBackground(&gamestate.bg);
     
-    LoadRoom("../chronicles/data/rooms/room04.glb", &gamestate.room, &gamestate);
+    LoadRoom("../chronicles/data/rooms/room05.glb", &gamestate.room, &gamestate);
     LoadModel("../chronicles/data/models/arwin8.glb", &gamestate.model);
     
     int jointCount = gamestate.model.skeleton.jointCount;
@@ -80,8 +80,8 @@ main(int argc, char** argv)
     CreateLinePipeline(&gamestate.po.lp);
     
     // player spawn location
-    gamestate.player.position.x = 2.0f;
-    gamestate.player.position.z = 7.0f;
+    gamestate.player.position.x = 0.8f;
+    gamestate.player.position.z = 2.0f;
     
     gDone = 0;
     Uint64 last = SDL_GetPerformanceCounter();
