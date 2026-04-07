@@ -12,6 +12,8 @@ Update(Player *p, float dt)
     SDL_Event e;
     if (SDL_PollEvent(&e))
     {
+        ImGui_ImplSDL3_ProcessEvent(&e);
+        
         if (e.type == SDL_EVENT_QUIT)
         {
             return false;
@@ -96,6 +98,22 @@ Update(Player *p, float dt)
 void
 Render(GameState *gamestate, font_atlas *f)
 {
+    ImGui_ImplSDLGPU3_NewFrame();
+    ImGui_ImplSDL3_NewFrame();
+    ImGui::NewFrame();
+    
+    // your widgets
+    ImGui::Begin("Light Controls");
+    ImGui::SliderFloat("Ambient",      &gamestate->ambientLight,  0.0f, 1.0f);
+    ImGui::SliderFloat("Light Radius", &gamestate->lightRadius,   0.0f, 50.0f);
+    ImGui::SliderFloat3("Light Pos",   &gamestate->lightPos.x,   -10.0f, 5.0f);
+    ImGui::SliderFloat("Cam X",        &gamestate->camera.x,          0.0f, 20.0f);
+    ImGui::SliderFloat("Cam Y",        &gamestate->camera.y,          0.0f, 20.0f);
+    ImGui::SliderFloat("Cam Z",        &gamestate->camera.z,          0.0f, 30.0f);
+    ImGui::End();
+    
+    ImGui::Render();
+    
     // NOTE(trist007): worth noting that SDL_GetTicks returns an ever increased Uint32
     // so after roughly 49.7 days it wraps back to near zero but for AnimTime it should
     // have much effect
@@ -142,7 +160,10 @@ Render(GameState *gamestate, font_atlas *f)
     // alone in the dark mode
     
     mat4_lookat(view,
-                -0.65f, 7.0f, 11.0f, // camera position
+                gamestate->camera.x,
+                gamestate->camera.y,
+                gamestate->camera.z, // camera position
+                //-0.65f, 7.0f, 11.0f, // camera position
                 -0.65f, 2.0f, 4.65f, // look target
                 0.0f,   1.0f, 0.0f);   // up vector
     
@@ -155,8 +176,8 @@ Render(GameState *gamestate, font_atlas *f)
     mat4_rotation_y(rot, gamestate->player.yaw);
     mat4_mul(model, trans, rot);
     mat4_mul(mvp, vp, model);  // mvp = vp * model
-    RenderRoom(&gamestate->room, &gamestate->lightPos, cmd, swapchain, vp);
-    RenderModel(&gamestate->model, &gamestate->player, &gamestate->lightPos, cmd, swapchain, mvp);
+    RenderRoom(gamestate, cmd, swapchain, vp);
+    RenderModel(gamestate, cmd, swapchain, mvp);
     
     /*
     // enemies
@@ -196,6 +217,16 @@ Render(GameState *gamestate, font_atlas *f)
     //PushLine(&po->lp, {4.77f, 0.0f, 9.18f}, {-5.49f, 0.0f, 10.19f});
     
     FlushLines(&gamestate->po.lp, cmd, swapchain, vp);
+    
+    // ImGui render pass - must be last, LOAD not CLEAR
+    ImGui_ImplSDLGPU3_PrepareDrawData(ImGui::GetDrawData(), cmd);
+    SDL_GPUColorTargetInfo imguiColor = {};
+    imguiColor.texture  = swapchain;
+    imguiColor.load_op  = SDL_GPU_LOADOP_LOAD;
+    imguiColor.store_op = SDL_GPU_STOREOP_STORE;
+    SDL_GPURenderPass *imguiPass = SDL_BeginGPURenderPass(cmd, &imguiColor, 1, NULL);
+    ImGui_ImplSDLGPU3_RenderDrawData(ImGui::GetDrawData(), cmd, imguiPass);
+    SDL_EndGPURenderPass(imguiPass);
     
     SDL_SubmitGPUCommandBuffer(cmd);
     

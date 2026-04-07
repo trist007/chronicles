@@ -277,11 +277,11 @@ LoadRoom(const char *path, Model *m, GameState *gamestate)
 }
 
 void
-RenderRoom(Model *m, Vec3 *lightPos, SDL_GPUCommandBuffer *cmd,
+RenderRoom(GameState *gamestate, SDL_GPUCommandBuffer *cmd,
            SDL_GPUTexture *swapchain, float *vp)
 {
-    float ambientLight = 0.7f;
-    float lightRadius  = 4.0f;
+    //float ambientLight = 0.7f;
+    //float lightRadius  = 4.0f;
     
     // rotate the room clockwise by 45 degrees
     //float angle = -PI32 / 4.0f; // -45 degrees
@@ -308,37 +308,37 @@ RenderRoom(Model *m, Vec3 *lightPos, SDL_GPUCommandBuffer *cmd,
     color.store_op               = SDL_GPU_STOREOP_STORE;
     
     SDL_GPUDepthStencilTargetInfo depth = {};
-    depth.texture                       = m->depthTexture;
+    depth.texture                       = gamestate->room.depthTexture;
     depth.load_op                       = SDL_GPU_LOADOP_CLEAR;
     depth.clear_depth                   = 1.0f;
     depth.store_op                      = SDL_GPU_STOREOP_DONT_CARE;
     
     SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(cmd, &color, 1, &depth);
-    SDL_BindGPUGraphicsPipeline(pass, m->pipeline);
+    SDL_BindGPUGraphicsPipeline(pass, gamestate->room.pipeline);
     
-    SDL_GPUBufferBinding vb = { m->vertexBuffer, 0 };
+    SDL_GPUBufferBinding vb = { gamestate->room.vertexBuffer, 0 };
     SDL_BindGPUVertexBuffers(pass, 0, &vb, 1);
-    SDL_GPUBufferBinding ib = { m->indexBuffer, 0 };
+    SDL_GPUBufferBinding ib = { gamestate->room.indexBuffer, 0 };
     SDL_BindGPUIndexBuffer(pass, &ib, SDL_GPU_INDEXELEMENTSIZE_32BIT);
     
     // vertex uniform - just VP, no skinning
-    //memcpy(m->uniformBuffer, vp, 64);
-    //SDL_PushGPUVertexUniformData(cmd, 0, m->uniformBuffer, 64);
-    //int uniformSize = (16 + m->jointCount * 16) * sizeof(float);
-    //memcpy(m->uniformBuffer, vp, 64);
-    //SDL_PushGPUVertexUniformData(cmd, 0, m->uniformBuffer, uniformSize);
+    //memcpy(gamestate->model.uniformBuffer, vp, 64);
+    //SDL_PushGPUVertexUniformData(cmd, 0, gamestate->model.uniformBuffer, 64);
+    //int uniformSize = (16 + gamestate->model.jointCount * 16) * sizeof(float);
+    //memcpy(gamestate->model.uniformBuffer, vp, 64);
+    //SDL_PushGPUVertexUniformData(cmd, 0, gamestate->model.uniformBuffer, uniformSize);
     
     SDL_PushGPUVertexUniformData(cmd, 0, mvp, 64);
     
-    for(int i = 0; i < m->mesh.primitiveCount; i++)
+    for(int i = 0; i < gamestate->room.mesh.primitiveCount; i++)
     {
-        Primitive *prim = &m->mesh.primitives[i];
+        Primitive *prim = &gamestate->room.mesh.primitives[i];
         float r = ((prim->color >>  0) & 0xff) / 255.0f;
         float g = ((prim->color >>  8) & 0xff) / 255.0f;
         float b = ((prim->color >> 16) & 0xff) / 255.0f;
         float col[12] = { r, g, b, 1.0f,
-            lightPos->x, lightPos->y, lightPos->z, ambientLight,
-            lightRadius, 0.0f, 0.0f, 0.0f };
+            gamestate->lightPos.x, gamestate->lightPos.y, gamestate->lightPos.z,
+            gamestate->ambientLight, gamestate->lightRadius, 0.0f, 0.0f, 0.0f };
         SDL_PushGPUFragmentUniformData(cmd, 0, col, sizeof(col));
         SDL_DrawGPUIndexedPrimitives(pass, prim->triCount * 3, 1, prim->triOffset * 3, 0, 0);
     }
@@ -525,12 +525,12 @@ RenderBackground(Background *b, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapc
 }
 
 void
-RenderModel(Model *m, Player *p, Vec3 *lightPos, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain, float *mvp)
+RenderModel(GameState *gamestate, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain, float *mvp)
 {
     // Add a point light at the lightPos
-    float ambientLight = 0.7f;
+    //float ambientLight = 0.7f;
     //float lightPos[3] = { 3.3f, 0.0f, 1.0f };
-    float lightRadius = 15.0f;
+    //float lightRadius = 15.0f;
     
     SDL_GPUColorTargetInfo modelColor = {};
     modelColor.texture  = swapchain;
@@ -538,34 +538,35 @@ RenderModel(Model *m, Player *p, Vec3 *lightPos, SDL_GPUCommandBuffer *cmd, SDL_
     modelColor.store_op = SDL_GPU_STOREOP_STORE;
     
     SDL_GPUDepthStencilTargetInfo depth = {};
-    depth.texture      = m->depthTexture;
+    depth.texture      = gamestate->model.depthTexture;
     depth.load_op      = SDL_GPU_LOADOP_CLEAR;
     depth.clear_depth  = 1.0f;
     depth.store_op     = SDL_GPU_STOREOP_DONT_CARE;
     
     SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(cmd, &modelColor, 1, &depth);
-    SDL_BindGPUGraphicsPipeline(pass, m->pipeline);
+    SDL_BindGPUGraphicsPipeline(pass, gamestate->model.pipeline);
     
-    SDL_GPUBufferBinding vb = { m->vertexBuffer, 0 };
+    SDL_GPUBufferBinding vb = { gamestate->model.vertexBuffer, 0 };
     SDL_BindGPUVertexBuffers(pass, 0, &vb, 1);
-    SDL_GPUBufferBinding ib = { m->indexBuffer, 0 };
+    SDL_GPUBufferBinding ib = { gamestate->model.indexBuffer, 0 };
     SDL_BindGPUIndexBuffer(pass, &ib, SDL_GPU_INDEXELEMENTSIZE_32BIT);
     
-    int jointCount    = m->skeleton.jointCount;
+    int jointCount    = gamestate->model.skeleton.jointCount;
     int uniformSize   = (16 + jointCount * 16) * sizeof(float);
-    memcpy(m->uniformBuffer,      mvp,            64);
-    memcpy(m->uniformBuffer + 16, m->pose.matrices, jointCount * 64);
+    memcpy(gamestate->model.uniformBuffer,      mvp,            64);
+    memcpy(gamestate->model.uniformBuffer + 16, gamestate->model.pose.matrices, jointCount * 64);
     
-    SDL_PushGPUVertexUniformData(cmd, 0, m->uniformBuffer, uniformSize);
+    SDL_PushGPUVertexUniformData(cmd, 0, gamestate->model.uniformBuffer, uniformSize);
     
-    for(int i = 0; i < m->mesh.primitiveCount; i++)  // or primitiveCount if that's on the struct
+    for(int i = 0; i < gamestate->model.mesh.primitiveCount; i++)  // or primitiveCount if that's on the struct
     {
-        Primitive *prim = &m->mesh.primitives[i];
+        Primitive *prim = &gamestate->model.mesh.primitives[i];
         float red = ((prim->color >> 0)  & 0xff) / 255.0f;
         float green = ((prim->color >> 8)  & 0xff) / 255.0f;
         float blue = ((prim->color >> 16) & 0xff) / 255.0f;
-        float col[9] = { red, green, blue, 1.0f, ambientLight,
-            lightPos->x, lightPos->y, lightPos->z, lightRadius };
+        float col[9] = { red, green, blue, 1.0f, gamestate->ambientLight,
+            gamestate->lightPos.x, gamestate->lightPos.y, gamestate->lightPos.z,
+            gamestate->lightRadius };
         SDL_PushGPUFragmentUniformData(cmd, 0, col, sizeof(col));
         SDL_DrawGPUIndexedPrimitives(pass, prim->triCount * 3, 1, prim->triOffset * 3, 0, 0);
     }

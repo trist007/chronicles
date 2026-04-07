@@ -903,15 +903,18 @@ struct Player
 
 struct GameState
 {
-    Player player;
-    Model model;
-    Model room;
-    Background bg;
-    const char *graphicsAPI;
-    pipelineObjects po;
+    Player           player;
+    Model            model;
+    Model            room;
+    Background       bg;
+    const char       *graphicsAPI;
+    pipelineObjects  po;
     
     // light
-    Vec3 lightPos;
+    Vec3             lightPos;
+    float            ambientLight;
+    float            lightRadius;
+    Vec3             camera;
 };
 
 // ################################################################################

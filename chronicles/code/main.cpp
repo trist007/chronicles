@@ -1,3 +1,4 @@
+#define IMGUI_DEFINE_MATH_OPERATORS
 #include <string.h>
 #include <math.h>
 #include <stdlib.h>
@@ -5,6 +6,15 @@
 #include "SDL3/SDL_main.h"
 #include "SDL3_image/SDL_image.h"
 #include "SDL3_ttf/SDL_ttf.h"
+
+#include "imgui/imgui.cpp"
+#include "imgui/imgui_impl_sdl3.cpp"
+#include "imgui/imgui_impl_sdlgpu3.cpp"
+#include "imgui/imgui_demo.cpp"
+#include "imgui/imgui_draw.cpp"
+#include "imgui/imgui_tables.cpp"
+#include "imgui/imgui_widgets.cpp"
+
 
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
@@ -53,6 +63,7 @@ main(int argc, char** argv)
     TTF_Init();
     
     gSDLWindow = SDL_CreateWindow("SDL3 window", gWINDOW_WIDTH, gWINDOW_HEIGHT, 0);
+    IMGUI_CHECKVERSION();
     
     // 16MB will need static for BSS as stack limit is 1MB
     static uint8_t perm[16 * 1024 * 1024];
@@ -61,8 +72,29 @@ main(int argc, char** argv)
     arenaInit(&gArena, perm, sizeof(perm));
     
     GameState gamestate = {};
+    
+    // point light parameters
     gamestate.lightPos = { 4.5f, 0.0f, -5.0f };
+    gamestate.ambientLight = 0.8f;
+    gamestate.lightRadius = 10.0f;
+    
+    // camera starting
+    gamestate.camera = { -0.65f, 7.0f, 11.0f };
+    
+    // player spawn location
+    gamestate.player.position.x = 0.8f;
+    gamestate.player.position.z = 2.0f;
+    
     RendererInit(&gamestate);
+    
+    // ImGui init
+    ImGui::CreateContext();
+    ImGui_ImplSDL3_InitForSDLGPU(gSDLWindow);
+    ImGui_ImplSDLGPU3_InitInfo imguiInfo = {};
+    imguiInfo.Device             = gGPUDevice;
+    imguiInfo.ColorTargetFormat  = SDL_GetGPUSwapchainTextureFormat(gGPUDevice, gSDLWindow);
+    imguiInfo.MSAASamples        = SDL_GPU_SAMPLECOUNT_1;
+    ImGui_ImplSDLGPU3_Init(&imguiInfo);
     
     //LoadBackground(&gamestate.bg);
     
@@ -79,9 +111,6 @@ main(int argc, char** argv)
     
     CreateLinePipeline(&gamestate.po.lp);
     
-    // player spawn location
-    gamestate.player.position.x = 0.8f;
-    gamestate.player.position.z = 2.0f;
     
     gDone = 0;
     Uint64 last = SDL_GetPerformanceCounter();
@@ -98,6 +127,10 @@ main(int argc, char** argv)
     }
     
     RendererDestroy(&gamestate.bg, &gamestate.model, &gamestate.po);
+    
+    ImGui_ImplSDLGPU3_Shutdown();
+    ImGui_ImplSDL3_Shutdown();
+    ImGui::DestroyContext();
     
     SDL_DestroyWindow(gSDLWindow);
     TTF_Quit();
