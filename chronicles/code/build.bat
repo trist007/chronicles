@@ -18,7 +18,7 @@ REM echo Updating etags
 REM echo,
 REM etags *.cpp *.h raylib\*.c
 
-IF NOT EXIST .\..\build mkdir ..\..\build
+IF NOT EXIST ..\..\build mkdir ..\..\build
 pushd ..\..\build
 copy /Y ..\chronicles\external\SDL3-3.4.2\lib\x64\SDL3.dll . > NUL
 copy /Y ..\chronicles\external\SDL3_image-3.4.0\lib\x64\SDL3_image.dll . > NUL

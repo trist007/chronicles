@@ -20,6 +20,8 @@ RendererInit(GameState *gamestate)
                                         bool debug_mode,
                                         const char *name);
 */
+    
+    SDL_SetHint("SDL_DIRECT3D12_DEBUG", "1");
     gGPUDevice = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_MSL,
                                      true, NULL);
     if(!gGPUDevice)
@@ -193,9 +195,143 @@ void pose_alloc(Pose *pose, Skeleton *skel)
 }
 
 void
-LoadModel(Model *m)
+LoadRoom(const char *path, Model *m, GameState *gamestate)
 {
-    load_model(m, "../chronicles/data/models/arwin8.glb");
+    load_room(m, path);
+    
+    // GPU upload - identical to LoadModel
+    SDL_GPUBufferCreateInfo vbInfo = {};
+    vbInfo.usage                   = SDL_GPU_BUFFERUSAGE_VERTEX;
+    vbInfo.size                    = m->mesh.vertCount * sizeof(Vertex);
+    m->vertexBuffer                = SDL_CreateGPUBuffer(gGPUDevice, &vbInfo);
+    
+    SDL_GPUBufferCreateInfo ibInfo = {};
+    ibInfo.usage                   = SDL_GPU_BUFFERUSAGE_INDEX;
+    ibInfo.size                    = m->mesh.triCount * 3 * sizeof(int);
+    m->indexBuffer                 = SDL_CreateGPUBuffer(gGPUDevice, &ibInfo);
+    
+    SDL_GPUTransferBufferCreateInfo tbInfo = {};
+    tbInfo.usage                           = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    tbInfo.size                            = vbInfo.size + ibInfo.size;
+    SDL_GPUTransferBuffer *tb              = SDL_CreateGPUTransferBuffer(gGPUDevice, &tbInfo);
+    
+    void *ptr = SDL_MapGPUTransferBuffer(gGPUDevice, tb, false);
+    memcpy(ptr, m->mesh.verts, vbInfo.size);
+    memcpy((char*)ptr + vbInfo.size, m->mesh.tris, ibInfo.size);
+    SDL_UnmapGPUTransferBuffer(gGPUDevice, tb);
+    
+    SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(gGPUDevice);
+    SDL_GPUCopyPass *cp       = SDL_BeginGPUCopyPass(cmd);
+    
+    SDL_GPUTransferBufferLocation src  = { tb, 0 };
+    SDL_GPUBufferRegion dst            = { m->vertexBuffer, 0, vbInfo.size };
+    SDL_UploadToGPUBuffer(cp, &src, &dst, false);
+    
+    SDL_GPUTransferBufferLocation src2 = { tb, vbInfo.size };
+    SDL_GPUBufferRegion dst2           = { m->indexBuffer, 0, ibInfo.size };
+    SDL_UploadToGPUBuffer(cp, &src2, &dst2, false);
+    
+    SDL_EndGPUCopyPass(cp);
+    SDL_SubmitGPUCommandBuffer(cmd);
+    SDL_ReleaseGPUTransferBuffer(gGPUDevice, tb);
+    
+    // Room shaders - no skinning so vertex uniform is just MVP (16 floats)
+    SDL_GPUShader *room_vert = CreateShader("../chronicles/shaders/room_vertex.dxil",
+                                            SDL_GPU_SHADERSTAGE_VERTEX, 1, 0);
+    SDL_GPUShader *room_frag = CreateShader("../chronicles/shaders/room_fragment.dxil",
+                                            SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
+    
+    // Room vertex layout - pos + normal only (no joints/weights)
+    SDL_GPUVertexBufferDescription vbDesc = { 0, sizeof(Vertex), SDL_GPU_VERTEXINPUTRATE_VERTEX, 0 };
+    SDL_GPUVertexAttribute attrs[] = {
+        { 0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, pos)    },
+        { 1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, normal) },
+        { 2, 0, SDL_GPU_VERTEXELEMENTFORMAT_INT3,   offsetof(Vertex, joints) },
+        { 3, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(Vertex, weights) },
+    };
+    
+    SDL_GPUTextureCreateInfo depthInfo     = {};
+    depthInfo.type                         = SDL_GPU_TEXTURETYPE_2D;
+    depthInfo.format                       = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+    depthInfo.usage                        = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+    depthInfo.width                        = gWINDOW_WIDTH;
+    depthInfo.height                       = gWINDOW_HEIGHT;
+    depthInfo.layer_count_or_depth         = 1;
+    depthInfo.num_levels                   = 1;
+    m->depthTexture                        = SDL_CreateGPUTexture(gGPUDevice, &depthInfo);
+    
+    m->pipeline = CreatePipeline(room_vert, room_frag, &vbDesc, 1, attrs, 4,
+                                 SDL_GPU_PRIMITIVETYPE_TRIANGLELIST, true);
+    SDL_Log("room pipeline: %p error: %s", (void*)m->pipeline, SDL_GetError());
+    
+    
+    SDL_ReleaseGPUShader(gGPUDevice, room_vert);
+    SDL_ReleaseGPUShader(gGPUDevice, room_frag);
+    
+    // uniform buffer just needs MVP (16 floats) - no skinning
+    // m->uniformBuffer = (float*)arenaAlloc(&gArena, 16 * sizeof(float));
+    int jointCount = gamestate->model.skeleton.jointCount;
+    m->uniformBuffer = (float*)arenaAlloc(&gArena, (16 + jointCount * 16) * sizeof(float));
+    mat4_identity(m->uniformBuffer + 16);  // dummy joint
+    m->jointCount = jointCount;
+}
+
+void
+RenderRoom(Model *m, Vec3 *lightPos, SDL_GPUCommandBuffer *cmd,
+           SDL_GPUTexture *swapchain, float *vp)
+{
+    float ambientLight = 1.0f;
+    float lightRadius  = 10.0f;
+    
+    SDL_GPUColorTargetInfo color = {};
+    color.texture                = swapchain;
+    color.load_op                = SDL_GPU_LOADOP_CLEAR;   // replaces RenderBackground
+    color.clear_color            = {0, 0, 0, 1};
+    color.store_op               = SDL_GPU_STOREOP_STORE;
+    
+    SDL_GPUDepthStencilTargetInfo depth = {};
+    depth.texture                       = m->depthTexture;
+    depth.load_op                       = SDL_GPU_LOADOP_CLEAR;
+    depth.clear_depth                   = 1.0f;
+    depth.store_op                      = SDL_GPU_STOREOP_DONT_CARE;
+    
+    SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(cmd, &color, 1, &depth);
+    SDL_BindGPUGraphicsPipeline(pass, m->pipeline);
+    
+    SDL_GPUBufferBinding vb = { m->vertexBuffer, 0 };
+    SDL_BindGPUVertexBuffers(pass, 0, &vb, 1);
+    SDL_GPUBufferBinding ib = { m->indexBuffer, 0 };
+    SDL_BindGPUIndexBuffer(pass, &ib, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+    
+    // vertex uniform - just VP, no skinning
+    //memcpy(m->uniformBuffer, vp, 64);
+    //SDL_PushGPUVertexUniformData(cmd, 0, m->uniformBuffer, 64);
+    //int uniformSize = (16 + m->jointCount * 16) * sizeof(float);
+    //memcpy(m->uniformBuffer, vp, 64);
+    //SDL_PushGPUVertexUniformData(cmd, 0, m->uniformBuffer, uniformSize);
+    SDL_PushGPUVertexUniformData(cmd, 0, vp, 64);
+    
+    for(int i = 0; i < m->mesh.primitiveCount; i++)
+    {
+        Primitive *prim = &m->mesh.primitives[i];
+        float r = ((prim->color >>  0) & 0xff) / 255.0f;
+        float g = ((prim->color >>  8) & 0xff) / 255.0f;
+        float b = ((prim->color >> 16) & 0xff) / 255.0f;
+        float col[12] = { r, g, b, 1.0f,
+            lightPos->x, lightPos->y, lightPos->z, ambientLight,
+            lightRadius, 0.0f, 0.0f, 0.0f };
+        SDL_PushGPUFragmentUniformData(cmd, 0, col, sizeof(col));
+        SDL_DrawGPUIndexedPrimitives(pass, prim->triCount * 3, 1, prim->triOffset * 3, 0, 0);
+    }
+    
+    SDL_EndGPURenderPass(pass);
+}
+
+void
+LoadModel(const char *path, Model *m)
+{
+    load_model(m, path);
+    
     pose_alloc(&m->pose, &m->skeleton);
     SDL_Log("primitiveCount after load: %d", m->mesh.primitiveCount);
     SDL_Log("vertCount: %d  triCount: %d", m->mesh.vertCount, m->mesh.triCount);
@@ -304,6 +440,12 @@ LoadModel(Model *m)
     depthInfo.num_levels                                   = 1;
     m->depthTexture                                        = SDL_CreateGPUTexture(gGPUDevice, &depthInfo);
     
+    SDL_Log("vert: %p  frag: %p", (void*)vertCode, (void*)fragCode);
+    if(!vertCode || !fragCode)
+    {
+        SDL_Log("room shaders are null, aborting");
+        return;
+    }
     m->pipeline = SDL_CreateGPUGraphicsPipeline(gGPUDevice, &pipeInfo);
     
     // can release shaders after pipeline is created
@@ -335,10 +477,9 @@ RendererDestroy(Background *b, Model *m, pipelineObjects *po)
 // ################################################################################
 
 void
-RenderBackground(Background *b, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain)
+RenderBackground(Background *b, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapchain,
+                 Vec3 *lightPos, float lightRadius)
 {
-    float ambientLight = 0.2f;
-    //float ambientData[4] = { ambientLight, 0.0f, 0.0f, 0.0f };
     
     SDL_GPUColorTargetInfo bgColor = {};
     bgColor.texture     = swapchain;
@@ -350,6 +491,13 @@ RenderBackground(Background *b, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swapc
     SDL_BindGPUGraphicsPipeline(bgPass, b->backgroundPipeline);
     SDL_GPUTextureSamplerBinding bgBinding = { b->backgroundTexture, b->backgroundSampler };
     SDL_BindGPUFragmentSamplers(bgPass, 0, &bgBinding, 1);
+    
+    float ambientLight = 0.3f;
+    float bgLightData[5] = {
+        ambientLight,
+        lightPos->x, lightPos->y, lightPos->z,
+        lightRadius
+    };
     
     SDL_PushGPUFragmentUniformData(cmd, 0, &ambientLight, sizeof(float));  // here
     
@@ -450,7 +598,7 @@ SDL_GPUGraphicsPipeline *CreatePipeline(
     pipeInfo.fragment_shader                               = fragShader;
     pipeInfo.primitive_type                                = topology;
     pipeInfo.vertex_input_state.vertex_buffer_descriptions = vbDescs;
-    pipeInfo.vertex_input_state.num_vertex_buffers         = numVBDescs;;
+    pipeInfo.vertex_input_state.num_vertex_buffers         = numVBDescs;
     pipeInfo.vertex_input_state.vertex_attributes          = attrs;
     pipeInfo.vertex_input_state.num_vertex_attributes      = numAttrs;
     

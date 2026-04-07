@@ -64,8 +64,10 @@ main(int argc, char** argv)
     gamestate.lightPos = { 3.3f, 0.0f, 1.0f };
     RendererInit(&gamestate);
     
-    LoadBackground(&gamestate.bg);
-    LoadModel(&gamestate.model);
+    //LoadBackground(&gamestate.bg);
+    
+    LoadRoom("../chronicles/data/rooms/room04.glb", &gamestate.room, &gamestate);
+    LoadModel("../chronicles/data/models/arwin8.glb", &gamestate.model);
     
     int jointCount = gamestate.model.skeleton.jointCount;
     

@@ -3,7 +3,7 @@
 void
 LoadFontAtlas(font_atlas *atlas)
 {
-    TTF_Font *font                                         = TTF_OpenFont("../chronicles/fonts/liberation-mono.ttf", 17);
+    TTF_Font *font                                         = TTF_OpenFont("../chronicles/fonts/liberation-mono.ttf", 24);
     
     // First pass - measure total atlas width and height
     int atlasWidth                                         = 0;

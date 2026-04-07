@@ -118,10 +118,9 @@ Render(GameState *gamestate, font_atlas *f)
         return;
     }
     
-    RenderBackground(&gamestate->bg, cmd, swapchain);
     // draw circle for lightPos
     //PushCircle(&gamestate->po.lp, gamestate->lightPos, 0.25f, 32);
-    PushFilledCircle(&gamestate->po.lp, gamestate->lightPos, 0.25f, 32);
+    PushFilledCircle(&gamestate->po.lp, gamestate->lightPos, 0.25f, 50);
     
     // build model * view * projection mvp
     float proj[16], view[16], model[16], vp[16], mvp[16];
@@ -141,11 +140,12 @@ Render(GameState *gamestate, font_atlas *f)
     // fixed camera
     //mat4_translation(view, 0.0f, 0.0f, -5.0f); // fixed camera pulled back
     // alone in the dark mode
+    
     mat4_lookat(view,
                 -0.65f, 7.0f, 14.0f, // camera position
                 -0.65f, 0.0f, 4.65f, // look target
                 0.0f,   1.0f, 0.0f);   // up vector
-    
+
     // combine proj and view
     mat4_mul(vp, proj, view);  // vp = proj * view
     
@@ -155,6 +155,7 @@ Render(GameState *gamestate, font_atlas *f)
     mat4_rotation_y(rot, gamestate->player.yaw);
     mat4_mul(model, trans, rot);
     mat4_mul(mvp, vp, model);  // mvp = vp * model
+    RenderRoom(&gamestate->room, &gamestate->lightPos, cmd, swapchain, vp);
     RenderModel(&gamestate->model, &gamestate->player, &gamestate->lightPos, cmd, swapchain, mvp);
     
     /*

@@ -514,7 +514,129 @@ void extract_mesh(cgltf_data *data, Mesh *mesh)
     }
 }
 
-bool load_model(Model *m, const char *path)
+bool
+load_room(Model *m, const char *path)
+{
+    cgltf_options options = {};
+    cgltf_data   *data    = NULL;
+    
+    if(cgltf_parse_file(&options, path, &data) != cgltf_result_success)
+    {
+        SDL_Log("load_room: parse failed: %s", path);
+        return false;
+    }
+    if(cgltf_load_buffers(&options, data, path) != cgltf_result_success)
+    {
+        SDL_Log("load_room: load buffers failed");
+        cgltf_free(data);
+        return false;
+    }
+    
+    // count totals across ALL meshes
+    int totalVerts = 0;
+    int totalTris  = 0;
+    for(int mi = 0; mi < (int)data->meshes_count; mi++)
+    {
+        cgltf_mesh *mesh = &data->meshes[mi];
+        for(int p = 0; p < (int)mesh->primitives_count; p++)
+        {
+            cgltf_primitive *prim = &mesh->primitives[p];
+            if(!prim->indices) continue;
+            totalVerts += (int)prim->attributes[0].data->count;
+            totalTris  += (int)prim->indices->count / 3;
+        }
+    }
+    
+    Mesh *out = &m->mesh;
+    out->vertCount      = totalVerts;
+    out->triCount       = totalTris;
+    out->primitiveCount = 0;
+    out->verts = (Vertex*)arenaAlloc(&gArena, totalVerts * sizeof(Vertex));
+    out->tris  = (Tri*)arenaAlloc(&gArena, totalTris  * sizeof(Tri));
+    memset(out->verts, 0, totalVerts * sizeof(Vertex));
+    
+    int vertOffset = 0;
+    int triOffset  = 0;
+    
+    for(int mi = 0; mi < (int)data->meshes_count; mi++)
+    {
+        cgltf_mesh *mesh = &data->meshes[mi];
+        for(int p = 0; p < (int)mesh->primitives_count; p++)
+        {
+            cgltf_primitive *prim = &mesh->primitives[p];
+            if(!prim->indices) continue;
+            
+            cgltf_accessor *posAcc  = NULL;
+            cgltf_accessor *normAcc = NULL;
+            cgltf_accessor *uvAcc   = NULL;
+            
+            for(int i = 0; i < (int)prim->attributes_count; i++)
+            {
+                cgltf_attribute *attr = &prim->attributes[i];
+                switch(attr->type)
+                {
+                    case cgltf_attribute_type_position: posAcc  = attr->data; break;
+                    case cgltf_attribute_type_normal:   normAcc = attr->data; break;
+                    case cgltf_attribute_type_texcoord: uvAcc   = attr->data; break;
+                    default: break;
+                }
+            }
+            
+            if(!posAcc) continue;
+            
+            int primVerts = (int)posAcc->count;
+            for(int i = 0; i < primVerts; i++)
+            {
+                Vertex *v = &out->verts[vertOffset + i];
+                if(posAcc)  read_float_n(posAcc,  i, &v->pos.x,    3);
+                if(normAcc) read_float_n(normAcc, i, &v->normal.x, 3);
+                if(uvAcc)   read_float_n(uvAcc,   i, &v->uv.u,     2);
+                // no joints/weights for static room
+            }
+            
+            int primTris = (int)prim->indices->count / 3;
+            for(int i = 0; i < primTris; i++)
+            {
+                unsigned int a, b, c;
+                read_uint(prim->indices, i*3+0, &a);
+                read_uint(prim->indices, i*3+1, &b);
+                read_uint(prim->indices, i*3+2, &c);
+                out->tris[triOffset + i] = {{
+                        (int)a + vertOffset,
+                        (int)b + vertOffset,
+                        (int)c + vertOffset
+                    }};
+            }
+            
+            unsigned int color = 0xffffffff;
+            if(prim->material)
+            {
+                cgltf_pbr_metallic_roughness *pbr = &prim->material->pbr_metallic_roughness;
+                int r = (int)(pbr->base_color_factor[0] * 255);
+                int g = (int)(pbr->base_color_factor[1] * 255);
+                int b = (int)(pbr->base_color_factor[2] * 255);
+                color = (b << 16) | (g << 8) | r;
+            }
+            
+            if(out->primitiveCount < 16)
+                out->primitives[out->primitiveCount++] = { vertOffset, triOffset, primTris, color };
+            
+            vertOffset += primVerts;
+            triOffset  += primTris;
+        }
+    }
+    
+    SDL_Log("load_room: %d verts, %d tris, %d primitives",
+            totalVerts, totalTris, out->primitiveCount);
+    //debug_model_bounds(out);
+    
+    cgltf_free(data);
+    return true;
+}
+
+
+bool
+load_model(Model *m, const char *path)
 {
     cgltf_options options = {};
     cgltf_data   *data    = NULL;
@@ -783,6 +905,7 @@ struct GameState
 {
     Player player;
     Model model;
+    Model room;
     Background bg;
     const char *graphicsAPI;
     pipelineObjects po;
