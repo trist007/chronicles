@@ -283,6 +283,23 @@ RenderRoom(Model *m, Vec3 *lightPos, SDL_GPUCommandBuffer *cmd,
     float ambientLight = 0.15f;
     float lightRadius  = 15.0f;
     
+    // rotate the room clockwise by 45 degrees
+    float angle = -PI32 / 4.0f; // -45 degrees
+    float c = cosf(angle);
+    float s = sinf(angle);
+    
+    // Y-axis rotation, column major
+    float model[16] = {
+        c,  0, -s, 0,
+        0,  1, 0, 0,
+        s,  0, c, 0,
+        0,  0, 0, 1,
+    };
+    
+    // MVP = vp * model  (your note says mul(matrix, vector), column-major)
+    float mvp[16];
+    mat4_mul(mvp, vp, model);  // whatever your mat4 multiply is named
+    
     SDL_GPUColorTargetInfo color = {};
     color.texture                = swapchain;
     color.load_op                = SDL_GPU_LOADOP_CLEAR;   // replaces RenderBackground
@@ -309,7 +326,8 @@ RenderRoom(Model *m, Vec3 *lightPos, SDL_GPUCommandBuffer *cmd,
     //int uniformSize = (16 + m->jointCount * 16) * sizeof(float);
     //memcpy(m->uniformBuffer, vp, 64);
     //SDL_PushGPUVertexUniformData(cmd, 0, m->uniformBuffer, uniformSize);
-    SDL_PushGPUVertexUniformData(cmd, 0, vp, 64);
+    
+    SDL_PushGPUVertexUniformData(cmd, 0, mvp, 64);
     
     for(int i = 0; i < m->mesh.primitiveCount; i++)
     {
